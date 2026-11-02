@@ -366,12 +366,17 @@ struct GlassTime: View {
             let hh = String(format: "%02d", cal.component(.hour, from: date)), mm = String(format: "%02d", cal.component(.minute, from: date))
             let fs = min(geo.size.width * 0.78 / 1.2, geo.size.height * 0.36)
             let shape = DigitsShape(hh: hh, mm: mm, fs: fs)
-            Group {
+            // legible Liquid Glass: soft dark halo for contrast (not a drop shadow), regular glass tinted white,
+            // frosted white fill and a crisp bright rim
+            ZStack {
+                shape.fill(Color.black.opacity(0.55)).blur(radius: fs * 0.09)
                 if #available(watchOS 26.0, *) {
-                    Color.clear.glassEffect(.clear, in: shape)
+                    Color.clear.glassEffect(.regular.tint(.white.opacity(0.55)), in: shape)
                 } else {
                     shape.fill(.ultraThinMaterial)
                 }
+                shape.fill(Color.white.opacity(0.6))
+                shape.stroke(Color.white, lineWidth: 1.5)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }

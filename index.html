@@ -77,12 +77,11 @@ var grain=document.createElement('canvas');grain.width=grain.height=128;(functio
 // ?t=2026-11-02T12:00Z previews another moment (testing); default is the live device clock
 var TOFF=(function(){var m=/[?&]t=([^&]+)/.exec(location.search),v=m&&Date.parse(decodeURIComponent(m[1]));return v?v-Date.now():0;})();
 var gl1=document.createElement('canvas'),gl2=document.createElement('canvas');
-var gl3=document.createElement('canvas');
+var gl3=document.createElement('canvas'),glSm=document.createElement('canvas');
 function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
- // Liquid Glass, flat as in Apple's HIG (clear variant): the digits are a lens over the map. Inside them the map is
- // very lightly blurred and magnified (refraction), with a faint luminosity lift (adaptive tint); the only edge
- // treatment is a thin specular rim, brightest where it faces the light (top-left) and fading away from it.
- // No bevel, inner shadow, drop shadow or grey fill.
+ // Liquid Glass (regular variant) tuned for legibility: frosted white glass over a blurred backdrop, a crisp
+ // bright rim and a very soft dark halo for contrast (vibrancy, not a drop shadow). No ctx.filter: blur is done by
+ // downscaling and upscaling with smoothing, so it looks the same in Safari.
  [gl1,gl2,gl3].forEach(function(c){if(c.width!==w||c.height!==h){c.width=w;c.height=h;}});
  var a=gl1.getContext('2d'),b=gl2.getContext('2d'),m=gl3.getContext('2d');
  // slanted sporty digits (Chakra Petch Bold Italic, OFL) on fixed tabular cells so the width never jumps
@@ -91,16 +90,16 @@ function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
  function txt(x,dx,dy){each(x,dx,dy,x.fillText);}
  m.setTransform(dpr,0,0,dpr,0,0);m.clearRect(0,0,W,H);m.fillStyle='#000';txt(m,0,0);
  function mask(x,src){x.save();x.setTransform(1,0,0,1,0,0);x.globalCompositeOperation='destination-in';x.drawImage(src||gl3,0,0);x.restore();}
- // lens: what is behind, lightly blurred, slightly brighter, magnified 6% about each row's centre
- a.setTransform(1,0,0,1,0,0);a.globalCompositeOperation='source-over';a.clearRect(0,0,w,h);a.filter='blur('+(1.5*dpr)+'px) brightness(1.18) saturate(1.15)';
- [CY-OY,CY+OY].forEach(function(cy){a.save();a.beginPath();a.rect(0,(cy-FS*.42)*dpr,w,FS*.84*dpr);a.clip();
-  a.translate(CX*dpr,cy*dpr);a.scale(1.06,1.06);a.translate(-CX*dpr,-cy*dpr);a.drawImage(cv,0,0);a.restore();});
- a.filter='none';a.setTransform(dpr,0,0,dpr,0,0);a.fillStyle='rgba(255,255,255,.07)';a.fillRect(0,0,W,H);mask(a);
- // specular rim: a 1px edge band (glyph minus a 1px-eroded copy) lit by a top-left to bottom-right gradient
- b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);
- b.lineJoin='round';b.lineWidth=2.2;
- var gr=b.createLinearGradient(CX-FS*.7,CY-OY-FS*.5,CX+FS*.7,CY+OY+FS*.5);gr.addColorStop(0,'rgba(255,255,255,.95)');gr.addColorStop(.45,'rgba(255,255,255,.35)');gr.addColorStop(.55,'rgba(255,255,255,.18)');gr.addColorStop(1,'rgba(255,255,255,.6)');
- b.strokeStyle=gr;each(b,0,0,b.strokeText);mask(b); // keep only the inner half: a hairline on the glass edge
+ function soft(src,k){var s=glSm;s.width=Math.ceil(w/k);s.height=Math.ceil(h/k);var sx=s.getContext('2d');sx.imageSmoothingEnabled=true;sx.clearRect(0,0,s.width,s.height);sx.drawImage(src,0,0,s.width,s.height);return s;}
+ // 1) halo: the glyph shape, heavily blurred, in translucent black around the digits
+ var hs=soft(gl3,14);g.save();g.globalAlpha=.9;g.imageSmoothingEnabled=true;g.drawImage(hs,0,0,W,H);g.drawImage(hs,0,0,W,H);g.restore();
+ // 2) frosted glass: blurred backdrop (downscaled copy) with ~60% white over it, cut to the glyphs
+ a.setTransform(1,0,0,1,0,0);a.globalCompositeOperation='source-over';a.clearRect(0,0,w,h);a.imageSmoothingEnabled=true;
+ a.drawImage(soft(cv,10),0,0,w,h);a.fillStyle='rgba(255,255,255,.82)';a.fillRect(0,0,w,h);mask(a);
+ // 3) rim: crisp bright white edge (~1.8 px inside the glyph), slightly brighter toward the top-left light
+ b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.lineJoin='round';b.lineWidth=3.6;
+ var gr=b.createLinearGradient(CX-FS*.7,CY-OY-FS*.5,CX+FS*.7,CY+OY+FS*.5);gr.addColorStop(0,'#fff');gr.addColorStop(1,'rgba(255,255,255,.85)');
+ b.strokeStyle=gr;each(b,0,0,b.strokeText);mask(b);
  a.globalCompositeOperation='source-over';a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);
  g.drawImage(gl1,0,0,W,H);}
 function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom;
@@ -152,7 +151,7 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  tag(p[0],p[1],'SUN');
  var m=P(S.moon[0],S.moon[1]);moonIcon(m[0],m[1],8,S.ph);tag(m[0],m[1],'MOON '+Math.round((1-Math.cos(S.ph))/2*100)+'%');
  if(QP.get('debug')){var ss=P(S.sun[0],S.sun[1]),sm=P(S.moon[0],S.moon[1]);g.save();g.lineWidth=1.5;g.strokeStyle='#f0f';g.beginPath();g.arc(ss[0],ss[1],12,0,7);g.moveTo(ss[0]-16,ss[1]);g.lineTo(ss[0]+16,ss[1]);g.moveTo(ss[0],ss[1]-16);g.lineTo(ss[0],ss[1]+16);g.stroke();
-  g.strokeStyle='#0ff';g.beginPath();g.arc(sm[0],sm[1],10,0,7);g.stroke();g.fillStyle='#f0f';g.font='700 8px '+MONO;g.textAlign='left';g.fillText('SUBSOLAR '+S.sun[0].toFixed(1)+','+S.sun[1].toFixed(1),8,48);g.fillStyle='#0ff';g.fillText('SUBLUNAR '+S.moon[0].toFixed(1)+','+S.moon[1].toFixed(1),8,58);g.restore();}
+  g.strokeStyle='#0ff';g.beginPath();g.arc(sm[0],sm[1],10,0,7);g.stroke();g.fillStyle='#f0f';g.font='700 8px '+MONO;g.textAlign='center';g.fillText('SUBSOLAR '+S.sun[0].toFixed(1)+','+S.sun[1].toFixed(1),CX,H-46);g.fillStyle='#0ff';g.fillText('SUBLUNAR '+S.moon[0].toFixed(1)+','+S.moon[1].toFixed(1),CX,H-36);g.restore();}
  corners(now,S);
  g.save();g.globalAlpha=.06;g.fillStyle='#000';for(var sy=0;sy<H;sy+=3)g.fillRect(0,sy,W,1);g.globalAlpha=1;
  var gp=g.createPattern(grain,'repeat');g.translate(Math.random()*128,Math.random()*128);g.fillStyle=gp;g.fillRect(-128,-128,W+256,H+256);g.restore();
@@ -235,7 +234,7 @@ function corners(now,S){getWx();var se=sunEvent(now,S);
  g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';
  g.fillText(place.name||'SANTANDREI, ROMANIA',CX,16);
  g.font='700 8px '+MONO;g.fillStyle=AMB;g.fillText(['SUN','MON','TUE','WED','THU','FRI','SAT'][now.getDay()]+' '+String(now.getDate()).padStart(2,'0')+' '+['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][now.getMonth()]+' '+now.getFullYear(),CX,29);
- g.font='800 9px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('GPS')===0?'':' FALLBACK'),CX,H-11);g.restore();}
+ g.font='800 9px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('default')===0?' FALLBACK':''),CX,H-11);g.restore();}
 var QP=new URLSearchParams(location.search);if(QP.get('lat')&&QP.get('lon'))pos={lat:+QP.get('lat'),lon:+QP.get('lon'),src:'test override'};
 if(navigator.geolocation&&!QP.get('lat'))navigator.geolocation.watchPosition(function(r){var mv=Math.hypot(r.coords.latitude-pos.lat,r.coords.longitude-pos.lon)>.05;pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS \u00b1'+Math.round(r.coords.accuracy)+' m'};if(mv)wx.at=0;},function(){},{enableHighAccuracy:false,maximumAge:6e4,timeout:2e4});
 function setZoom(z){zoom=Math.min(ZF,Math.max(1,z));localStorage.setItem('enochZoom',zoom);draw();}
