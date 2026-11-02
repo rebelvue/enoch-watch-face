@@ -25,7 +25,7 @@ struct FaceView: View {
             Canvas { g, size in draw(&g, size, ctx.date) }
         }
         .ignoresSafeArea()
-        .background(Color(red: 0.91, green: 0.87, blue: 0.80))
+        .background(Color.black)
     }
 
     private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date) {
@@ -36,8 +36,8 @@ struct FaceView: View {
             let r = (90 - lat) / 180 * R; return CGPoint(x: c.x + r * sin(lon * d), y: c.y + r * cos(lon * d)) }
         func dot(_ p: CGPoint, _ r: Double, _ col: Color) { g.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(col)) }
 
-        // beyond the ice wall: calm warm neutral, not outer space
-        g.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.91, green: 0.87, blue: 0.80)))
+        // beyond the ice wall: pure black (OLED)
+        g.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black))
         // map
         let disc = CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R)
         g.drawLayer { l in
@@ -105,8 +105,8 @@ struct FaceView: View {
     private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
 
     private func corner(_ g: inout GraphicsContext, _ p: CGPoint, _ anchor: UnitPoint, _ top: String, _ big: String, _ col: Color) {
-        g.draw(Text(top).font(.system(size: 10, weight: .bold)).foregroundColor(Color(red: 0.54, green: 0.43, blue: 0.29)), at: p, anchor: anchor)
-        g.draw(Text(big).font(.system(size: 17, weight: .heavy, design: .rounded)).foregroundColor(col), at: CGPoint(x: p.x, y: p.y + 17), anchor: anchor)
+        g.draw(Text(top).font(.system(size: 10, weight: .bold)).foregroundColor(.white.opacity(0.7)), at: p, anchor: anchor)
+        g.draw(Text(big).font(.system(size: 17, weight: .heavy, design: .rounded)).foregroundColor(.white), at: CGPoint(x: p.x, y: p.y + 17), anchor: anchor)
     }
 
     private func corners(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ sky: Sky) {

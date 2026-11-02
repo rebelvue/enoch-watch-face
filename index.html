@@ -4,7 +4,7 @@
 <meta name="theme-color" content="#f6efe3"><link rel="manifest" href="manifest.json"><title>Enoch Watch Face</title>
 <style>html,body{margin:0;height:100%;background:#f6efe3;font-family:-apple-system,system-ui,sans-serif;color:#5a4632}
 body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-.watch{background:#3a3530;border-radius:96px;padding:18px;box-shadow:0 10px 30px rgba(90,70,50,.35)}
+.watch{background:#111;border-radius:96px;padding:18px;box-shadow:0 10px 30px rgba(90,70,50,.35)}
 canvas{display:block;border-radius:78px;width:min(82vw,396px);aspect-ratio:396/484;height:auto}
 p{margin:0;font-size:13px;opacity:.75;text-align:center;max-width:90vw}</style></head><body>
 <div class="watch"><canvas id="c" width="396" height="484"></canvas></div>
@@ -37,8 +37,7 @@ function moonIcon(x,y,rad,ph){g.save();g.beginPath();g.arc(x,y,rad,0,7);g.clip()
  g.restore();g.strokeStyle='rgba(255,255,255,.7)';g.lineWidth=1;g.beginPath();g.arc(x,y,rad,0,7);g.stroke();}
 function draw(){var now=new Date(),S=sky(now.getTime());
  // beyond the ice wall: not outer space, a calm warm neutral (the dome rests on the ice wall)
- var bg=g.createRadialGradient(CX,CY,R,CX,CY,Math.hypot(W,H)/2);bg.addColorStop(0,'#e9dfcd');bg.addColorStop(1,'#cfc2ab');
- g.fillStyle=bg;g.fillRect(0,0,W,H);
+ g.fillStyle='#000';g.fillRect(0,0,W,H);
  // map
  g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();
  if(disc.complete&&disc.naturalWidth){g.filter='brightness(1.35) saturate(1.25)';g.drawImage(disc,CX-R,CY-R,2*R,2*R);g.filter='none';}
@@ -88,8 +87,8 @@ function moonName(p){var f=p/(2*Math.PI);return f<.03||f>.97?'NEW':f<.22?'WAX CR
 function getWx(){if(Date.now()-wx.at<18e5)return;wx.at=Date.now();
  fetch('https://api.open-meteo.com/v1/forecast?latitude='+pos.lat.toFixed(3)+'&longitude='+pos.lon.toFixed(3)+'&current=temperature_2m&hourly=precipitation_probability&forecast_hours=1').then(function(r){return r.json();}).then(function(j){wx.t=Math.round(j.current.temperature_2m);wx.p=(j.hourly&&j.hourly.precipitation_probability)?j.hourly.precipitation_probability[0]:null;}).catch(function(){});}
 var batt=null;if(navigator.getBattery)navigator.getBattery().then(function(b){batt=b;}).catch(function(){});
-function chip(x,y,al,top,big,col){g.save();g.textAlign=al;g.font='700 10px -apple-system,system-ui,sans-serif';g.fillStyle='#8a6d4b';g.fillText(top,x,y);
- g.font='800 17px -apple-system,system-ui,sans-serif';g.fillStyle=col||'#3d2e20';g.fillText(big,x,y+18);g.restore();}
+function chip(x,y,al,top,big,col){g.save();g.textAlign=al;g.font='700 10px -apple-system,system-ui,sans-serif';g.fillStyle='rgba(255,255,255,.7)';g.fillText(top,x,y);
+ g.font='800 17px -apple-system,system-ui,sans-serif';g.fillStyle='#fff';g.fillText(big,x,y+18);g.restore();}
 function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos(S.ph))/2*100);
  g.textBaseline='middle';
  chip(34,30,'left','SUN'+(se[1]==='RISE'?'RISE':se[1]==='SET'?'SET':''),se[0],'#c7781a');

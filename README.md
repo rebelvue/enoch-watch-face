@@ -34,7 +34,7 @@ These are the same low-precision formulas the main map uses, accurate to about 0
 - **Sun:** mean anomaly and ecliptic longitude, converted to declination and right ascension. Its map longitude is RA minus Greenwich sidereal time.
 - **Moon:** ecliptic longitude with the three main periodic terms, plus latitude, converted the same way. The phase is the moon's ecliptic longitude minus the sun's.
 - **Stars:** set inside the firmament, on the dome's inner surface, as in world-of-enoch-3d-map. Seen from above they all fall over the disc and turn around the pole with Greenwich sidereal time. They are faint over the day side and bright over the night side. They're decorative, not real catalogue stars.
-- **Firmament:** a translucent dome over the disc, with its rim on the ice wall. Outside the ice wall is a calm warm neutral background, not outer space.
+- **Firmament:** a translucent dome over the disc, with its rim on the ice wall. Outside the ice wall the screen is pure black (OLED), with no stars; corner texts are white.
 
 ## Corner complications
 - **Top-left:** the next sunrise or sunset at your position, computed locally from the subsolar point.
