@@ -13,6 +13,7 @@ targets:
         WKApplication: true
         WKWatchOnly: true
         NSLocationWhenInUseUsageDescription: Shows your position on the flat-earth map.
+        UIAppFonts: [ChakraPetch-BoldItalic.ttf]
         NSHealthShareUsageDescription: Shows your live heart rate on the watch face.
     entitlements:
       path: EnochWatch.entitlements

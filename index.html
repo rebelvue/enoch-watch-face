@@ -2,7 +2,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Enoch Watch">
 <meta name="theme-color" content="#f6efe3"><link rel="manifest" href="manifest.json"><title>Enoch Watch Face</title>
-<style>@font-face{font-family:'JBM';src:url(jbm800.woff2) format('woff2');font-weight:800;font-display:block}
+<style>@font-face{font-family:'CPB';src:url(chakra-bi.woff2) format('woff2');font-weight:700;font-style:italic;font-display:block}@font-face{font-family:'JBM';src:url(jbm800.woff2) format('woff2');font-weight:800;font-display:block}
 html,body{margin:0;height:100%;background:#f6efe3;font-family:-apple-system,system-ui,sans-serif;color:#5a4632}
 body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
 .watch{background:#111;border-radius:96px;padding:18px;box-shadow:0 10px 30px rgba(90,70,50,.35)}
@@ -21,7 +21,7 @@ function gradeDisc(){if(discDay)return true;if(!disc.complete||!disc.naturalWidt
  function mk(f,tint,lift){var c=document.createElement('canvas');c.width=c.height=1024;var x=c.getContext('2d');x.filter=f;x.drawImage(disc,0,0,1024,1024);x.filter='none';
   x.globalCompositeOperation='multiply';x.fillStyle=tint;x.fillRect(0,0,1024,1024);if(lift){x.globalCompositeOperation='screen';x.fillStyle=lift;x.fillRect(0,0,1024,1024);}return c;}
  discDay=mk('sepia(.35) saturate(1.25) contrast(1.05) brightness(1.45)','#ffe2a0','rgba(165,125,50,.6)'); // sunlit: full brightness, warm golden
- discNight=mk('grayscale(.8) sepia(.2) hue-rotate(160deg) saturate(.6) brightness(.38)','#7b8898'); // night: ~20-25% brightness, cool slate
+ discNight=mk('grayscale(.8) sepia(.2) hue-rotate(160deg) saturate(.5) brightness(.24)','#6c7886'); // night: ~10-15% brightness, near-black, cool slate
  return true;}
 var disc=new Image();disc.src='disc.webp';disc.onload=draw;
 function P(lat,lon){var r=(90-lat)/180*R,a=lon*D;return[CX+r*Math.sin(a),CY+r*Math.cos(a)];}
@@ -65,7 +65,7 @@ function tag(x,y,t,acc){g.save();g.font='700 8px '+MONO;g.textAlign='left';g.tex
  if(tx+w>W-4)tx=x-14-w;g.fillStyle='rgba(0,0,0,.6)';g.beginPath();g.moveTo(tx+4,ty-6);g.lineTo(tx+w,ty-6);g.lineTo(tx+w-4,ty+6);g.lineTo(tx,ty+6);g.closePath();g.fill();
  g.strokeStyle=c;g.lineWidth=.9;g.stroke();g.beginPath();g.moveTo(x,y);g.lineTo(tx+(tx>x?0:w),ty+(tx>x?6:6));g.globalAlpha=.6;g.stroke();g.globalAlpha=1;
  g.fillStyle=c;g.fillText(t,tx+5,ty);g.restore();}
-function diamond(x,y,r,col,fill){g.beginPath();g.moveTo(x,y-r);g.lineTo(x+r,y);g.lineTo(x,y+r);g.lineTo(x-r,y);g.closePath();if(fill){g.fillStyle=fill;g.fill();}g.strokeStyle=col;g.stroke();}
+
 function gc(a1,o1,a2,o2){var p1=a1*D,p2=a2*D,dl=(o2-o1)*D,dk=2*Math.asin(Math.sqrt(Math.pow(Math.sin((p2-p1)/2),2)+Math.cos(p1)*Math.cos(p2)*Math.pow(Math.sin(dl/2),2)))*6371,
  b=(Math.atan2(Math.sin(dl)*Math.cos(p2),Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl))/D+360)%360;return [dk,b];}
 var grain=document.createElement('canvas');grain.width=grain.height=128;(function(){var x=grain.getContext('2d'),im=x.createImageData(128,128);
@@ -74,14 +74,17 @@ var grain=document.createElement('canvas');grain.width=grain.height=128;(functio
 var TOFF=(function(){var m=/[?&]t=([^&]+)/.exec(location.search),v=m&&Date.parse(decodeURIComponent(m[1]));return v?v-Date.now():0;})();
 var gl1=document.createElement('canvas'),gl2=document.createElement('canvas');
 var gl3=document.createElement('canvas');
-function glassTime(hh,mm){var FS=170,OY=82,w=cv.width,h=cv.height;
+function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
  // Liquid Glass, flat as in Apple's HIG (clear variant): the digits are a lens over the map. Inside them the map is
  // very lightly blurred and magnified (refraction), with a faint luminosity lift (adaptive tint); the only edge
  // treatment is a thin specular rim, brightest where it faces the light (top-left) and fading away from it.
  // No bevel, inner shadow, drop shadow or grey fill.
  [gl1,gl2,gl3].forEach(function(c){if(c.width!==w||c.height!==h){c.width=w;c.height=h;}});
  var a=gl1.getContext('2d'),b=gl2.getContext('2d'),m=gl3.getContext('2d');
- function txt(x,dx,dy){x.textAlign='center';x.textBaseline='middle';x.font='800 '+FS+'px '+MONO;x.fillText(hh,CX+dx,CY-OY+dy);x.fillText(mm,CX+dx,CY+OY+dy);}
+ // slanted sporty digits (Chakra Petch Bold Italic, OFL) on fixed tabular cells so the width never jumps
+ var TF='italic 700 '+FS+'px CPB,'+MONO,ADV=FS*.62;
+ function each(x,dx,dy,fn){x.textAlign='center';x.textBaseline='middle';x.font=TF;[[hh,CY-OY],[mm,CY+OY]].forEach(function(r){for(var i=0;i<2;i++)fn.call(x,r[0][i],CX+(i-.5)*ADV+dx,r[1]+dy);});}
+ function txt(x,dx,dy){each(x,dx,dy,x.fillText);}
  m.setTransform(dpr,0,0,dpr,0,0);m.clearRect(0,0,W,H);m.fillStyle='#000';txt(m,0,0);
  function mask(x,src){x.save();x.setTransform(1,0,0,1,0,0);x.globalCompositeOperation='destination-in';x.drawImage(src||gl3,0,0);x.restore();}
  // lens: what is behind, lightly blurred, slightly brighter, magnified 6% about each row's centre
@@ -91,9 +94,9 @@ function glassTime(hh,mm){var FS=170,OY=82,w=cv.width,h=cv.height;
  a.filter='none';a.setTransform(dpr,0,0,dpr,0,0);a.fillStyle='rgba(255,255,255,.07)';a.fillRect(0,0,W,H);mask(a);
  // specular rim: a 1px edge band (glyph minus a 1px-eroded copy) lit by a top-left to bottom-right gradient
  b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);
- b.lineJoin='round';b.lineWidth=2.2;b.textAlign='center';b.textBaseline='middle';b.font='800 '+FS+'px '+MONO;
+ b.lineJoin='round';b.lineWidth=2.2;
  var gr=b.createLinearGradient(CX-FS*.7,CY-OY-FS*.5,CX+FS*.7,CY+OY+FS*.5);gr.addColorStop(0,'rgba(255,255,255,.95)');gr.addColorStop(.45,'rgba(255,255,255,.35)');gr.addColorStop(.55,'rgba(255,255,255,.18)');gr.addColorStop(1,'rgba(255,255,255,.6)');
- b.strokeStyle=gr;b.strokeText(hh,CX,CY-OY);b.strokeText(mm,CX,CY+OY);mask(b); // keep only the inner half: a hairline on the glass edge
+ b.strokeStyle=gr;each(b,0,0,b.strokeText);mask(b); // keep only the inner half: a hairline on the glass edge
  a.globalCompositeOperation='source-over';a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);
  g.drawImage(gl1,0,0,W,H);}
 function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom;
@@ -107,16 +110,13 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  var N=96,sh=nightCv.getContext('2d'),img=sh.createImageData(N,N),sl=S.sun[0]*D,so=S.sun[1]*D;
  for(var j=0;j<N;j++)for(var i=0;i<N;i++){var dx=(i+.5)/N*2-1,dy=(j+.5)/N*2-1,r=Math.hypot(dx,dy),k=(j*N+i)*4;if(r>1.02)continue;
   var la=(90-Math.min(r,1)*180)*D,lo=Math.atan2(dx,dy),c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);
-  var t=Math.min(1,Math.max(0,(c+.05)/.1));t=t*t*(3-2*t);img.data[k]=img.data[k+1]=img.data[k+2]=255;img.data[k+3]=Math.round(255*t);}
+  var t=Math.min(1,Math.max(0,(c+.208)/.313)); /* twilight feather: sun elevation -12 to +6 deg */t=t*t*(3-2*t);img.data[k]=img.data[k+1]=img.data[k+2]=255;img.data[k+3]=Math.round(255*t);}
  sh.putImageData(img,0,0);
  if(gradeDisc()){g.imageSmoothingEnabled=true;g.drawImage(discNight,CX-R,CY-R,2*R,2*R);
   var lx=litCv.getContext('2d');lx.globalCompositeOperation='source-over';lx.clearRect(0,0,512,512);lx.drawImage(discDay,0,0,512,512);
   lx.globalCompositeOperation='destination-in';lx.imageSmoothingEnabled=true;lx.drawImage(nightCv,0,0,512,512);
   g.drawImage(litCv,CX-R,CY-R,2*R,2*R);}
- // terminator (sun elevation 0): great circle 90 deg from the subsolar point, thin amber dashed tactical contour
- g.save();g.beginPath();for(var q=0;q<=360;q+=2){var bq=q*D,la2=Math.asin(Math.cos(sl)*Math.cos(bq)),lo2=so+Math.atan2(Math.sin(bq)*Math.cos(sl),-Math.sin(sl)*Math.sin(la2));
-  var pt=P(la2/D,lo2/D);q?g.lineTo(pt[0],pt[1]):g.moveTo(pt[0],pt[1]);}
- g.setLineDash([5,4]);g.lineWidth=1.1;g.strokeStyle='rgba(255,177,59,.85)';g.stroke();g.restore();
+ drawBorders();
  // stars inside the firmament, turning around the pole with sidereal time; faint by day, bright at night
  var rot=S.gst*D;
  // real bright stars (HYG, mag<4.5): over the ground point at lat=Dec, lon=RA-GST, like the sun and moon
@@ -130,13 +130,10 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  g.fillStyle=dm;g.fillRect(CX-R,CY-R,2*R,2*R);
  g.restore();
  g.strokeStyle='rgba(220,245,230,.9)';g.lineWidth=1.2;g.beginPath();g.arc(CX,CY,R,0,7);g.stroke();
- // tactical overlay: range rings (every 30 deg of latitude), radials, rim ticks with labels, radar sweep
+ // tactical overlay: range rings (every 30 deg of latitude), radials, rim ticks with labels
  g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();g.strokeStyle='rgba(191,245,210,.22)';g.lineWidth=.8;
  [60,30,0,-30,-60].forEach(function(la){g.beginPath();g.arc(CX,CY,(90-la)/180*R,0,7);g.stroke();});
  for(var k=0;k<12;k++){var a=k*30*D;g.beginPath();g.moveTo(CX,CY);g.lineTo(CX+R*Math.sin(a),CY+R*Math.cos(a));g.stroke();}
- var sw=(performance.now()/6000%1)*2*Math.PI;
- for(var k=0;k<24;k++){var a0=sw-k*.025;g.strokeStyle='rgba(191,245,210,'+(.45*(1-k/24))+')';g.lineWidth=k?2:1.5;
-  g.beginPath();g.moveTo(CX,CY);g.lineTo(CX+R*Math.sin(a0),CY-R*Math.cos(a0));g.stroke();}
  g.restore();
  g.strokeStyle=ACC;g.fillStyle=ACC;g.font='700 7px '+MONO;g.textAlign='center';g.textBaseline='middle';
  for(var k=0;k<36;k++){var a=k*10*D,l=k%3?3:7,sx=Math.sin(a),cy_=Math.cos(a);g.lineWidth=k%3?.8:1.2;
@@ -146,11 +143,7 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  var p=P(S.sun[0],S.sun[1]);sunIcon(p[0],p[1]);
  tag(p[0],p[1],'SUN');
  var m=P(S.moon[0],S.moon[1]);moonIcon(m[0],m[1],8,S.ph);tag(m[0],m[1],'MOON '+Math.round((1-Math.cos(S.ph))/2*100)+'%');
- // position: reticle + readout
- var q=P(pos.lat,pos.lon),x=q[0],y=q[1];g.lineWidth=1.4;diamond(x,y,8,AMB,'rgba(255,177,59,.18)');diamond(x,y,2.5,'#fff','#fff');
- g.strokeStyle='rgba(255,177,59,.7)';g.lineWidth=1;[[1,0],[-1,0],[0,1],[0,-1]].forEach(function(v){g.beginPath();g.moveTo(x+v[0]*11,y+v[1]*11);g.lineTo(x+v[0]*16,y+v[1]*16);g.stroke();});
- // position marker: diamond only, no labels
- // time digits: top layer, over map, sun, moon, tags, diamond, sweep, grid and stars (flat Liquid Glass lens)
+ // time digits: top layer, over map, sun, moon, tags, grid and stars (flat Liquid Glass lens)
  var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');glassTime(hh,mm);
  corners(now,S);
  g.save();g.globalAlpha=.06;g.fillStyle='#000';for(var sy=0;sy<H;sy+=3)g.fillRect(0,sy,W,1);g.globalAlpha=1;
@@ -163,7 +156,26 @@ var place={name:null,lat:null,lon:null,busy:false};
 function getPlace(){ // BigDataCloud reverse-geocode-client (free, no key); only refetch after moving >5 km
  if(place.busy)return;if(place.lat!=null&&gc(pos.lat,pos.lon,place.lat,place.lon)[0]<5)return;
  place.busy=true;var la=pos.lat,lo=pos.lon;
- fetch('https://api.bigdatacloud.net/data/reverse-geocode-client?latitude='+la.toFixed(4)+'&longitude='+lo.toFixed(4)+'&localityLanguage=en').then(function(r){return r.json();}).then(function(j){var n=j.city||j.locality||j.principalSubdivision||j.countryName;if(n)place.name=n.toUpperCase();place.lat=la;place.lon=lo;}).catch(function(){place.lat=la;place.lon=lo;}).finally(function(){place.busy=false;});}
+ fetch('https://api.bigdatacloud.net/data/reverse-geocode-client?latitude='+la.toFixed(4)+'&longitude='+lo.toFixed(4)+'&localityLanguage=en').then(function(r){return r.json();}).then(function(j){var n=j.city||j.locality||j.principalSubdivision,cn=j.countryName||(bd.country&&bd.country[0]);place.name=[n,cn].filter(Boolean).join(', ').toUpperCase()||null;if(n)getCity(n,la,lo);place.lat=la;place.lon=lo;}).catch(function(){place.lat=la;place.lon=lo;}).finally(function(){place.busy=false;});}
+// borders: current country (bundled Natural Earth 1:110m admin-0, public domain) and city (Nominatim, cached per city)
+var bd={all:null,country:null,city:[],cityName:null,cityBusy:false};
+fetch('countries.json').then(function(r){return r.json();}).then(function(a){bd.all=a;}).catch(function(){});
+function inRing(r,x,y){var c=false;for(var i=0,j=r.length-1;i<r.length;j=i++){var a=r[i],b=r[j];if((a[1]>y)!==(b[1]>y)&&x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0])c=!c;}return c;}
+function inPolys(ps,x,y){return ps.some(function(p){return inRing(p[0],x,y)&&!p.slice(1).some(function(h){return inRing(h,x,y);});});}
+function locateCountry(){if(!bd.all)return;var x=pos.lon,y=pos.lat;if(bd.country&&inPolys(bd.country[1],x,y))return;
+ bd.country=bd.all.find(function(c){return inPolys(c[1],x,y);})||null;}
+function getCity(n,la,lo){if(n===bd.cityName||bd.cityBusy)return;var k='enochCity:'+n;bd.cityName=n;bd.city=[];
+ try{var c=JSON.parse(localStorage.getItem(k));if(c){bd.city=c;return;}}catch(e){}
+ bd.cityBusy=true;fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&polygon_geojson=1&polygon_threshold=0.002&lat='+la.toFixed(4)+'&lon='+lo.toFixed(4))
+  .then(function(r){return r.json();}).then(function(j){var g=j.geojson,r=[];if(!g)return;
+   if(g.type==='Polygon')r=g.coordinates;else if(g.type==='MultiPolygon')g.coordinates.forEach(function(p){r=r.concat(p);});
+   r=r.map(function(rg){return rg.map(function(v){return[+v[0].toFixed(3),+v[1].toFixed(3)];});});bd.city=r;try{localStorage.setItem(k,JSON.stringify(r));}catch(e){}})
+  .catch(function(){}).finally(function(){bd.cityBusy=false;});}
+function drawBorders(){locateCountry();var OR='#ff8c1a';
+ function ring(rg){g.beginPath();rg.forEach(function(v,i){var p=P(v[1],v[0]);i?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1]);});g.closePath();g.stroke();}
+ g.save();g.lineJoin='round';g.strokeStyle=OR;
+ if(bd.country){g.lineWidth=1.1;bd.country[1].forEach(function(p){p.forEach(ring);});}
+ if(bd.city.length){g.lineWidth=.6;g.globalAlpha=.9;bd.city.forEach(ring);}g.restore();}
 function sunEvent(now,S){ // next sunrise/sunset at pos, from subsolar point (local calc)
  var la=pos.lat*D,de=S.sun[0]*D,c=(Math.sin(-.833*D)-Math.sin(la)*Math.sin(de))/(Math.cos(la)*Math.cos(de));
  if(c>1)return['POLAR','night'];if(c<-1)return['MIDN.','sun'];
@@ -213,10 +225,11 @@ function corners(now,S){getWx();var se=sunEvent(now,S);
  // top: live place name, then local date; bottom: coordinates
  getPlace();var cd='';if(se[2]){var m=Math.max(0,Math.round((se[2]-now.getTime())/6e4));cd=' \u00b7 SUN'+(se[1]==='RISE'?'RISE':'SET')+' IN '+Math.floor(m/60)+'H'+String(m%60).padStart(2,'0');}
  g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';
- g.fillText(place.name||'SANTANDREI',CX,16);
+ g.fillText(place.name||'SANTANDREI, ROMANIA',CX,16);
  g.font='700 8px '+MONO;g.fillStyle=AMB;g.fillText(['SUN','MON','TUE','WED','THU','FRI','SAT'][now.getDay()]+' '+String(now.getDate()).padStart(2,'0')+' '+['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][now.getMonth()]+' '+now.getFullYear(),CX,29);
  g.font='800 9px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('GPS')===0?'':' FALLBACK'),CX,H-11);g.restore();}
-if(navigator.geolocation)navigator.geolocation.watchPosition(function(r){var mv=Math.hypot(r.coords.latitude-pos.lat,r.coords.longitude-pos.lon)>.05;pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS \u00b1'+Math.round(r.coords.accuracy)+' m'};if(mv)wx.at=0;},function(){},{enableHighAccuracy:false,maximumAge:6e4,timeout:2e4});
+var QP=new URLSearchParams(location.search);if(QP.get('lat')&&QP.get('lon'))pos={lat:+QP.get('lat'),lon:+QP.get('lon'),src:'test override'};
+if(navigator.geolocation&&!QP.get('lat'))navigator.geolocation.watchPosition(function(r){var mv=Math.hypot(r.coords.latitude-pos.lat,r.coords.longitude-pos.lon)>.05;pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS \u00b1'+Math.round(r.coords.accuracy)+' m'};if(mv)wx.at=0;},function(){},{enableHighAccuracy:false,maximumAge:6e4,timeout:2e4});
 function setZoom(z){zoom=Math.min(ZF,Math.max(1,z));localStorage.setItem('enochZoom',zoom);draw();}
 var anim=null;function animTo(t){var z0=zoom,t0=performance.now();cancelAnimationFrame(anim);
  (function step(n){var k=Math.min(1,(n-t0)/280),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;setZoom(z0+(t-z0)*e);if(k<1)anim=requestAnimationFrame(step);})(t0);}
@@ -229,5 +242,5 @@ cv.addEventListener('touchend',function(e){if(e.touches.length<2)pinch=null;});
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
 cv.addEventListener('wheel',function(e){e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*(e.ctrlKey?.01:.002)));},{passive:false});
 cv.addEventListener('dblclick',function(e){e.preventDefault();toggle();});
-document.fonts.load("800 20px 'JBM'").then(draw,draw);setInterval(draw,100);
+Promise.all([document.fonts.load("800 20px 'JBM'"),document.fonts.load("italic 700 20px 'CPB'")]).then(draw,draw);setInterval(draw,100);
 </script></body></html>

@@ -11,16 +11,64 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let geo = CLGeocoder()
     private let m = CLLocationManager()
     override init() { super.init(); m.delegate = self; m.desiredAccuracy = kCLLocationAccuracyKilometer
-        m.distanceFilter = 500; m.requestWhenInUseAuthorization(); m.startUpdatingLocation() }
+        m.distanceFilter = 500; m.requestWhenInUseAuthorization(); m.startUpdatingLocation(); Borders.shared.locate(coord) }
     func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) { if let L = l.last { coord = L.coordinate; live = true
             // reverse-geocode (CLGeocoder) only after moving more than 5 km
             if placeAt.map({ L.distance(from: $0) > 5000 }) ?? true, !geo.isGeocoding {
                 placeAt = L; geo.reverseGeocodeLocation(L) { [weak self] pm, _ in
-                    if let n = pm?.first.flatMap({ $0.locality ?? $0.administrativeArea ?? $0.country }) { DispatchQueue.main.async { self?.place = n.uppercased() } } } } } }
+                    guard let f = pm?.first else { return }
+                    let city = (f.locality ?? f.administrativeArea)?.uppercased(), country = (f.country ?? Borders.shared.country?.name)?.uppercased()
+                    DispatchQueue.main.async { self?.place = [city, country].compactMap { $0 }.joined(separator: ", ")
+                        if let c = f.locality { Borders.shared.fetchCity(c, L.coordinate) } } } }
+            // country borders: point-in-polygon on every GPS fix (bundled Natural Earth 1:110m, public domain)
+            Borders.shared.locate(L.coordinate) } }
     func locationManager(_ m: CLLocationManager, didFailWithError e: Error) {}
 }
 
+/// Country (Natural Earth 1:110m admin-0, bundled countries.json: [[NAME, [polygon [ring [[lon,lat]]]]]])
+/// and city boundary (Nominatim polygon_geojson, fetched once per city change, skipped when unavailable).
+final class Borders: ObservableObject {
+    static let shared = Borders()
+    typealias Ring = [[Double]]
+    struct Country { let name: String; let polys: [[Ring]] }
+    private let all: [Country] = {
+        guard let u = Bundle.main.url(forResource: "countries", withExtension: "json"), let d = try? Data(contentsOf: u),
+              let a = try? JSONSerialization.jsonObject(with: d) as? [[Any]] else { return [] }
+        return a.compactMap { e in guard let n = e.first as? String, let p = e.last as? [[[[Double]]]] else { return nil }; return Country(name: n, polys: p) }
+    }()
+    @Published var country: Country? = nil
+    @Published var city: [Ring] = []
+    private var cityName: String? = nil
+    static func inside(_ r: Ring, _ x: Double, _ y: Double) -> Bool {
+        var c = false, j = r.count - 1
+        for i in 0..<r.count { let a = r[i], b = r[j]
+            if (a[1] > y) != (b[1] > y), x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0] { c.toggle() }; j = i }
+        return c
+    }
+    static func inPolys(_ ps: [[Ring]], _ x: Double, _ y: Double) -> Bool {
+        ps.contains { p in inside(p[0], x, y) && !p.dropFirst().contains { inside($0, x, y) } } }
+    func locate(_ c: CLLocationCoordinate2D) {
+        if let k = country, Borders.inPolys(k.polys, c.longitude, c.latitude) { return }
+        country = all.first { Borders.inPolys($0.polys, c.longitude, c.latitude) }
+    }
+    func fetchCity(_ name: String, _ c: CLLocationCoordinate2D) {
+        guard name != cityName else { return }; cityName = name; city = []
+        var u = URLComponents(string: "https://nominatim.openstreetmap.org/reverse")!
+        u.queryItems = [.init(name: "format", value: "jsonv2"), .init(name: "lat", value: String(c.latitude)), .init(name: "lon", value: String(c.longitude)),
+                        .init(name: "zoom", value: "10"), .init(name: "polygon_geojson", value: "1"), .init(name: "polygon_threshold", value: "0.002")]
+        var rq = URLRequest(url: u.url!); rq.setValue("EnochWatch/1.0 (github.com/rebelvue/enoch-watch-face)", forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: rq) { d, _, _ in
+            guard let d, let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let g = j["geojson"] as? [String: Any], let t = g["type"] as? String else { return }
+            var rings: [Ring] = []
+            if t == "Polygon", let p = g["coordinates"] as? [Ring] { rings = p }
+            if t == "MultiPolygon", let mp = g["coordinates"] as? [[Ring]] { rings = mp.flatMap { $0 } }
+            DispatchQueue.main.async { self.city = rings }
+        }.resume()
+    }
+}
+
 struct FaceView: View {
+    @ObservedObject private var borders = Borders.shared
     @StateObject private var loc = Locator()
     @StateObject private var hr = HeartRate()
     // map zoom: 1 = whole disc, fillZoom = disc covers the whole screen (radius = half the diagonal)
@@ -41,7 +89,7 @@ struct FaceView: View {
         TimelineView(.animation(minimumInterval: 0.1)) { ctx in
             ZStack {
                 Canvas { g, size in draw(&g, size, ctx.date) }
-                GlassTime(date: ctx.date).zIndex(1)   // top layer: digits over map, sun, moon, tags, diamond, sweep, grid, stars
+                GlassTime(date: ctx.date).zIndex(1)   // top layer: digits over map, sun, moon, tags, grid, stars
             }
         }
         .ignoresSafeArea()
@@ -81,18 +129,19 @@ struct FaceView: View {
                 if r > 1.03 { continue }
                 let la = (90 - min(r, 1) * 180) * d, lo = atan2(dx, dy)
                 let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
-                // sun's spotlight: lit within ~90 deg of the subsolar point, soft terminator (smoothstep)
-                var t = min(1, max(0, (e + 0.05) / 0.1)); t = t * t * (3 - 2 * t)
+                // sun's spotlight, feathered: smoothstep over sun elevation -12 deg (sin -0.208) to +6 deg (sin 0.105)
+                var t = min(1, max(0, (e + 0.208) / 0.313)); t = t * t * (3 - 2 * t)
                 let cellR = Path(CGRect(x: disc.minX + Double(i) * cell, y: disc.minY + Double(j) * cell, width: cell + 0.5, height: cell + 0.5))
-                if t < 1 { l.blendMode = .normal; l.fill(cellR, with: .color(Color(red: 0.03, green: 0.05, blue: 0.08).opacity(0.78 * (1 - t)))) } // night: ~20-25% brightness, cool slate
+                if t < 1 { l.blendMode = .normal; l.fill(cellR, with: .color(Color(red: 0.02, green: 0.03, blue: 0.05).opacity(0.88 * (1 - t)))) } // night: ~10-15% brightness, near-black slate
                 if t > 0 { l.blendMode = .screen; l.fill(cellR, with: .color(Color(red: 0.6, green: 0.45, blue: 0.14).opacity(0.85 * t))); l.blendMode = .normal } // day: full brightness, warm golden
             } }
-            // terminator (sun elevation 0): great circle 90 deg from the subsolar point, thin amber dashed contour
-            var term = Path()
-            for q in stride(from: 0.0, through: 360.0, by: 3.0) {
-                let b = q * d, la2 = asin(cos(sl) * cos(b)), lo2 = so + atan2(sin(b) * cos(sl), -sin(sl) * sin(la2)), rr = (90 - la2 / d) / 180 * R
-                let pt = CGPoint(x: c.x + rr * sin(lo2), y: c.y + rr * cos(lo2)); q == 0 ? term.move(to: pt) : term.addLine(to: pt) }
-            l.stroke(term, with: .color(Color(red: 1, green: 0.69, blue: 0.23).opacity(0.85)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            // current country (thin orange) and city (thinner orange) boundaries, projected like the map
+            let orange = Color(red: 1, green: 0.55, blue: 0.1)
+            func ringPath(_ rg: [[Double]]) -> Path { var p = Path()
+                for (k, v) in rg.enumerated() { let rr = (90 - v[1]) / 180 * R, a = v[0] * d, pt = CGPoint(x: c.x + rr * sin(a), y: c.y + rr * cos(a)); k == 0 ? p.move(to: pt) : p.addLine(to: pt) }
+                p.closeSubpath(); return p }
+            if let k = borders.country { for poly in k.polys { for rg in poly { l.stroke(ringPath(rg), with: .color(orange), lineWidth: 0.9) } } }
+            for rg in borders.city { l.stroke(ringPath(rg), with: .color(orange.opacity(0.9)), lineWidth: 0.5) }
             // real stars over the ground point lat = Dec, lon = RA - GST (same as sun and moon); faint by day
             for st in stars {
                 let r = (90 - st[1]) / 180; if r > 1 { continue }
@@ -109,7 +158,7 @@ struct FaceView: View {
                 .init(color: Color(red: 0.8, green: 0.9, blue: 1).opacity(0.5), location: 1)]), center: c, startRadius: 0, endRadius: R))
         }
 
-        // tactical overlay: range rings, radials, rim ticks, radar sweep
+        // tactical overlay: range rings, radials, rim ticks
         let acc = Color(red: 0.75, green: 0.96, blue: 0.82)
         g.drawLayer { l in
             l.clip(to: Path(ellipseIn: disc))
@@ -117,9 +166,6 @@ struct FaceView: View {
                 l.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)), with: .color(acc.opacity(0.22)), lineWidth: 0.6) }
             for k in 0..<12 { let a = Double(k) * 30 * d; var p = Path(); p.move(to: c); p.addLine(to: CGPoint(x: c.x + R * sin(a), y: c.y + R * cos(a)))
                 l.stroke(p, with: .color(acc.opacity(0.22)), lineWidth: 0.6) }
-            let sw = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 6) / 6 * 2 * .pi
-            for k in 0..<24 { let a = sw - Double(k) * 0.025; var p = Path(); p.move(to: c); p.addLine(to: CGPoint(x: c.x + R * sin(a), y: c.y - R * cos(a)))
-                l.stroke(p, with: .color(acc.opacity(0.45 * (1 - Double(k) / 24))), lineWidth: 1.5) }
         }
         g.stroke(Path(ellipseIn: disc), with: .color(Color(red: 0.75, green: 0.86, blue: 1).opacity(0.9)), lineWidth: 1.2)
         for k in 0..<36 { let a = Double(k) * 10 * d, len = k % 3 == 0 ? 6.0 : 3.0; var p = Path()
@@ -149,15 +195,12 @@ struct FaceView: View {
             g.draw(Image(decorative: img, scale: 1), in: CGRect(x: mp.x - mr, y: mp.y - mr, width: 2 * mr, height: 2 * mr)) }
         tag(mp, "MOON \(Int((1 - cos(sky.phase)) / 2 * 100))%", amb)
 
-        // you: waypoint diamond, LOC and HOME distance / bearing (great circle)
-        let me = P(loc.coord.latitude, loc.coord.longitude), la = loc.coord.latitude, lo = loc.coord.longitude
-        var dm = Path(); dm.move(to: CGPoint(x: me.x, y: me.y - 7)); dm.addLine(to: CGPoint(x: me.x + 7, y: me.y)); dm.addLine(to: CGPoint(x: me.x, y: me.y + 7)); dm.addLine(to: CGPoint(x: me.x - 7, y: me.y)); dm.closeSubpath()
-        g.fill(dm, with: .color(amb.opacity(0.18))); g.stroke(dm, with: .color(amb), lineWidth: 1.3); dot(me, 1.8, .white)
-        // position marker: diamond only, no labels
+        // you: position (no marker; borders and top line show it), LOC and HOME distance / bearing (great circle)
+        let la = loc.coord.latitude, lo = loc.coord.longitude
 
         // top: live place name, then local date; bottom: coordinates
         let dfm = DateFormatter(); dfm.locale = Locale(identifier: "en_US_POSIX"); dfm.dateFormat = "EEE dd MMM yyyy"
-        g.draw(Text(loc.place ?? "SANTANDREI").font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: 10))
+        g.draw(Text(loc.place ?? "SANTANDREI, ROMANIA").font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: 10))
         g.draw(Text(dfm.string(from: date).uppercased()).font(.system(size: 7, weight: .bold, design: .monospaced)).foregroundColor(amb), at: CGPoint(x: c.x, y: 20))
         g.draw(Text(String(format: "%.3f%@ / %07.3f%@%@", abs(la), la >= 0 ? "N" : "S", abs(lo), lo >= 0 ? "E" : "W", loc.live ? "" : " FALLBACK")).font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: size.height - 12))
 
@@ -282,15 +325,14 @@ struct FaceView: View {
 struct DigitsShape: Shape {
     let hh: String, mm: String, fs: CGFloat
     func path(in rect: CGRect) -> Path {
-        let font = CTFontCreateUIFontForLanguage(.system, fs, nil)!
-        let heavy = CTFontCreateCopyWithSymbolicTraits(font, fs, nil, [.traitBold, .traitMonoSpace], [.traitBold, .traitMonoSpace]) ?? font
+        // slanted sporty digits: Chakra Petch Bold Italic (OFL, bundled, UIAppFonts), placed on fixed tabular cells
+        let heavy = CTFontCreateWithName("ChakraPetch-BoldItalic" as CFString, fs, nil), adv = fs * 0.62
         func line(_ s: String) -> (CGMutablePath, CGRect) {
-            let attr = NSAttributedString(string: s, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): heavy])
-            let ln = CTLineCreateWithAttributedString(attr), out = CGMutablePath()
-            for run in CTLineGetGlyphRuns(ln) as! [CTRun] {
-                let n = CTRunGetGlyphCount(run); var gl = [CGGlyph](repeating: 0, count: n), pos = [CGPoint](repeating: .zero, count: n)
-                CTRunGetGlyphs(run, CFRange(location: 0, length: n), &gl); CTRunGetPositions(run, CFRange(location: 0, length: n), &pos)
-                for k in 0..<n { if let gp = CTFontCreatePathForGlyph(heavy, gl[k], nil) { out.addPath(gp, transform: CGAffineTransform(translationX: pos[k].x, y: pos[k].y)) } }
+            let out = CGMutablePath()
+            for (k, ch) in s.utf16.enumerated() {
+                var u = ch, gl: CGGlyph = 0; CTFontGetGlyphsForCharacters(heavy, &u, &gl, 1)
+                var w = CGSize.zero; CTFontGetAdvancesForGlyphs(heavy, .horizontal, &gl, &w, 1)
+                if let gp = CTFontCreatePathForGlyph(heavy, gl, nil) { out.addPath(gp, transform: CGAffineTransform(translationX: Double(k) * adv + (adv - w.width) / 2, y: 0)) }
             }
             return (out, out.boundingBoxOfPath)
         }
