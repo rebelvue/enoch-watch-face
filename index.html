@@ -2,7 +2,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Enoch Watch">
 <meta name="theme-color" content="#f6efe3"><link rel="manifest" href="manifest.json"><title>Enoch Watch Face</title>
-<style>@font-face{font-family:'CPB';src:url(chakra-bi.woff2) format('woff2');font-weight:700;font-style:italic;font-display:block}@font-face{font-family:'JBM';src:url(jbm800.woff2) format('woff2');font-weight:800;font-display:block}
+<link rel=preload href=chakra-bi.woff2 as=font type=font/woff2 crossorigin><link rel=preload href=jbm800.woff2 as=font type=font/woff2 crossorigin><link rel=preload href=disc.webp as=image>
+<style>@font-face{font-family:'CPB';src:url(chakra-bi.woff2) format('woff2');font-weight:700;font-style:italic;font-display:swap}@font-face{font-family:'JBM';src:url(jbm800.woff2) format('woff2');font-weight:800;font-display:swap}
 html,body{margin:0;height:100%;background:#f6efe3;font-family:-apple-system,system-ui,sans-serif;color:#5a4632}
 body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
 .watch{background:#111;border-radius:96px;padding:18px;box-shadow:0 10px 30px rgba(90,70,50,.35)}
@@ -90,8 +91,8 @@ function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
  var TF='italic 700 '+FS+'px CPB,'+MONO,ADV=FS*.62;
  function each(x,dx,dy,fn){x.textAlign='center';x.textBaseline='middle';x.font=TF;[[hh,CY-OY],[mm,CY+OY]].forEach(function(r){for(var i=0;i<2;i++)fn.call(x,r[0][i],CX+(i-.5)*ADV+dx,r[1]+dy);});}
  function mask(x,src){x.save();x.setTransform(1,0,0,1,0,0);x.globalCompositeOperation='destination-in';x.drawImage(src||gl3,0,0);x.restore();}
- var key=hh+mm+'|'+w+'|'+h+'|'+zoom.toFixed(3),now=performance.now(),G=glassTime;
- if(G.key!==key){G.key=key;G.t=0;
+ var fok=document.fonts.check("italic 700 20px CPB")?1:0,dok=disc.complete&&disc.naturalWidth?1:0,key=fok+''+dok+hh+mm+'|'+w+'|'+h+'|'+zoom.toFixed(3),now=performance.now(),G=glassTime;
+ if(G.key!==key){G.key=key;G.t=-1e9;
   m.setTransform(dpr,0,0,dpr,0,0);m.clearRect(0,0,W,H);m.fillStyle='#000';each(m,0,0,m.fillText);
   // edge field at half res: A = glyph alpha, B = blurred alpha (box blur by down/up scaling, twice)
   var sw=Math.ceil(w/2),sh=Math.ceil(h/2);glS.width=sw;glS.height=sh;var sx=glS.getContext('2d');sx.drawImage(gl3,0,0,sw,sh);
@@ -101,7 +102,7 @@ function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
   for(var i=0;i<N;i++){B[i]=Bd[i*4+3]/255;In[i]=A[i*4+3]>127?1:0;}
   G.f={sw:sw,sh:sh,B:B,In:In};}
  var f=G.f,sw=f.sw,sh=f.sh;
- if(now-G.t>10000){G.t=now;
+ if(now-G.t>(fok&&dok?10000:500)){G.t=now;
   var sx=glS.getContext('2d');sx.globalCompositeOperation='source-over';sx.clearRect(0,0,sw,sh);sx.drawImage(cv,0,0,sw,sh);
   var src=sx.getImageData(0,0,sw,sh),S_=src.data,out=sx.createImageData(sw,sh),O=out.data,B=f.B,In=f.In,sc=sw/W;
   var MAG=1.2,STR=18*sc,L=Math.SQRT1_2;
@@ -270,5 +271,5 @@ cv.addEventListener('touchend',function(e){if(e.touches.length<2)pinch=null;});
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
 cv.addEventListener('wheel',function(e){e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*(e.ctrlKey?.01:.002)));},{passive:false});
 cv.addEventListener('dblclick',function(e){e.preventDefault();toggle();});
-Promise.all([document.fonts.load("800 20px 'JBM'"),document.fonts.load("italic 700 20px 'CPB'")]).then(draw,draw);setInterval(draw,100);
+Promise.all([document.fonts.load("800 20px 'JBM'"),document.fonts.load("italic 700 20px 'CPB'")]).then(draw,draw);draw();setInterval(draw,100);
 </script></body></html>
