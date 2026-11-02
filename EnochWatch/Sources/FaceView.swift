@@ -41,7 +41,7 @@ struct FaceView: View {
         TimelineView(.animation(minimumInterval: 0.1)) { ctx in
             ZStack {
                 Canvas { g, size in draw(&g, size, ctx.date) }
-                GlassTime(date: ctx.date)   // Liquid Glass digits over the live map
+                GlassTime(date: ctx.date).zIndex(1)   // top layer: digits over map, sun, moon, tags, diamond, sweep, grid, stars
             }
         }
         .ignoresSafeArea()
@@ -82,11 +82,17 @@ struct FaceView: View {
                 let la = (90 - min(r, 1) * 180) * d, lo = atan2(dx, dy)
                 let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
                 // sun's spotlight: lit within ~90 deg of the subsolar point, soft terminator (smoothstep)
-                var t = min(1, max(0, (e + 0.1) / 0.22)); t = t * t * (3 - 2 * t)
+                var t = min(1, max(0, (e + 0.05) / 0.1)); t = t * t * (3 - 2 * t)
                 let cellR = Path(CGRect(x: disc.minX + Double(i) * cell, y: disc.minY + Double(j) * cell, width: cell + 0.5, height: cell + 0.5))
-                if t < 1 { l.blendMode = .normal; l.fill(cellR, with: .color(Color(red: 0.05, green: 0.08, blue: 0.11).opacity(0.62 * (1 - t)))) } // night: dark slate
-                if t > 0 { l.blendMode = .screen; l.fill(cellR, with: .color(Color(red: 0.42, green: 0.39, blue: 0.2).opacity(0.75 * t))); l.blendMode = .normal } // day: warm-lit khaki
+                if t < 1 { l.blendMode = .normal; l.fill(cellR, with: .color(Color(red: 0.03, green: 0.05, blue: 0.08).opacity(0.78 * (1 - t)))) } // night: ~20-25% brightness, cool slate
+                if t > 0 { l.blendMode = .screen; l.fill(cellR, with: .color(Color(red: 0.6, green: 0.45, blue: 0.14).opacity(0.85 * t))); l.blendMode = .normal } // day: full brightness, warm golden
             } }
+            // terminator (sun elevation 0): great circle 90 deg from the subsolar point, thin amber dashed contour
+            var term = Path()
+            for q in stride(from: 0.0, through: 360.0, by: 3.0) {
+                let b = q * d, la2 = asin(cos(sl) * cos(b)), lo2 = so + atan2(sin(b) * cos(sl), -sin(sl) * sin(la2)), rr = (90 - la2 / d) / 180 * R
+                let pt = CGPoint(x: c.x + rr * sin(lo2), y: c.y + rr * cos(lo2)); q == 0 ? term.move(to: pt) : term.addLine(to: pt) }
+            l.stroke(term, with: .color(Color(red: 1, green: 0.69, blue: 0.23).opacity(0.85)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             // real stars over the ground point lat = Dec, lon = RA - GST (same as sun and moon); faint by day
             for st in stars {
                 let r = (90 - st[1]) / 180; if r > 1 { continue }

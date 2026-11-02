@@ -20,8 +20,8 @@ var litCv=document.createElement('canvas');litCv.width=litCv.height=512;var disc
 function gradeDisc(){if(discDay)return true;if(!disc.complete||!disc.naturalWidth)return false;
  function mk(f,tint,lift){var c=document.createElement('canvas');c.width=c.height=1024;var x=c.getContext('2d');x.filter=f;x.drawImage(disc,0,0,1024,1024);x.filter='none';
   x.globalCompositeOperation='multiply';x.fillStyle=tint;x.fillRect(0,0,1024,1024);if(lift){x.globalCompositeOperation='screen';x.fillStyle=lift;x.fillRect(0,0,1024,1024);}return c;}
- discDay=mk('grayscale(.45) sepia(.55) hue-rotate(22deg) saturate(.95) contrast(1.1) brightness(1.9)','#e6dcb0','rgba(100,94,52,.65)'); // warm-lit olive/khaki
- discNight=mk('grayscale(.8) sepia(.2) hue-rotate(160deg) saturate(.6) contrast(1.05) brightness(.75)','#55606a'); // dark slate
+ discDay=mk('sepia(.35) saturate(1.25) contrast(1.05) brightness(1.45)','#ffe2a0','rgba(165,125,50,.6)'); // sunlit: full brightness, warm golden
+ discNight=mk('grayscale(.8) sepia(.2) hue-rotate(160deg) saturate(.6) brightness(.38)','#7b8898'); // night: ~20-25% brightness, cool slate
  return true;}
 var disc=new Image();disc.src='disc.webp';disc.onload=draw;
 function P(lat,lon){var r=(90-lat)/180*R,a=lon*D;return[CX+r*Math.sin(a),CY+r*Math.cos(a)];}
@@ -107,12 +107,16 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  var N=96,sh=nightCv.getContext('2d'),img=sh.createImageData(N,N),sl=S.sun[0]*D,so=S.sun[1]*D;
  for(var j=0;j<N;j++)for(var i=0;i<N;i++){var dx=(i+.5)/N*2-1,dy=(j+.5)/N*2-1,r=Math.hypot(dx,dy),k=(j*N+i)*4;if(r>1.02)continue;
   var la=(90-Math.min(r,1)*180)*D,lo=Math.atan2(dx,dy),c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);
-  var t=Math.min(1,Math.max(0,(c+.1)/.22));t=t*t*(3-2*t);img.data[k]=img.data[k+1]=img.data[k+2]=255;img.data[k+3]=Math.round(255*t);}
+  var t=Math.min(1,Math.max(0,(c+.05)/.1));t=t*t*(3-2*t);img.data[k]=img.data[k+1]=img.data[k+2]=255;img.data[k+3]=Math.round(255*t);}
  sh.putImageData(img,0,0);
  if(gradeDisc()){g.imageSmoothingEnabled=true;g.drawImage(discNight,CX-R,CY-R,2*R,2*R);
   var lx=litCv.getContext('2d');lx.globalCompositeOperation='source-over';lx.clearRect(0,0,512,512);lx.drawImage(discDay,0,0,512,512);
   lx.globalCompositeOperation='destination-in';lx.imageSmoothingEnabled=true;lx.drawImage(nightCv,0,0,512,512);
   g.drawImage(litCv,CX-R,CY-R,2*R,2*R);}
+ // terminator (sun elevation 0): great circle 90 deg from the subsolar point, thin amber dashed tactical contour
+ g.save();g.beginPath();for(var q=0;q<=360;q+=2){var bq=q*D,la2=Math.asin(Math.cos(sl)*Math.cos(bq)),lo2=so+Math.atan2(Math.sin(bq)*Math.cos(sl),-Math.sin(sl)*Math.sin(la2));
+  var pt=P(la2/D,lo2/D);q?g.lineTo(pt[0],pt[1]):g.moveTo(pt[0],pt[1]);}
+ g.setLineDash([5,4]);g.lineWidth=1.1;g.strokeStyle='rgba(255,177,59,.85)';g.stroke();g.restore();
  // stars inside the firmament, turning around the pole with sidereal time; faint by day, bright at night
  var rot=S.gst*D;
  // real bright stars (HYG, mag<4.5): over the ground point at lat=Dec, lon=RA-GST, like the sun and moon
@@ -138,9 +142,6 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  for(var k=0;k<36;k++){var a=k*10*D,l=k%3?3:7,sx=Math.sin(a),cy_=Math.cos(a);g.lineWidth=k%3?.8:1.2;
   g.beginPath();g.moveTo(CX+(R-l)*sx,CY+(R-l)*cy_);g.lineTo(CX+R*sx,CY+R*cy_);g.stroke();
   if(k%3===0&&k!==9&&k!==27&&R<H/2-14){var lo=k*10>180?k*10-360:k*10;g.fillText(Math.abs(lo).toString().padStart(3,'0')+(lo>0&&lo<180?'E':lo<0?'W':''),CX+(R+9)*sx,CY+(R+9)*cy_);}}
- // stacked time: Liquid Glass digits, as large as fits between the corners. The glyphs are a clip mask over a
- // blurred, slightly magnified copy of the live map (refraction), plus inner shadow, specular edge and faint rim light.
- var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');glassTime(hh,mm);
  // sun: soft lit glow + tactical tag
  var p=P(S.sun[0],S.sun[1]);sunIcon(p[0],p[1]);
  tag(p[0],p[1],'SUN');
@@ -149,6 +150,8 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  var q=P(pos.lat,pos.lon),x=q[0],y=q[1];g.lineWidth=1.4;diamond(x,y,8,AMB,'rgba(255,177,59,.18)');diamond(x,y,2.5,'#fff','#fff');
  g.strokeStyle='rgba(255,177,59,.7)';g.lineWidth=1;[[1,0],[-1,0],[0,1],[0,-1]].forEach(function(v){g.beginPath();g.moveTo(x+v[0]*11,y+v[1]*11);g.lineTo(x+v[0]*16,y+v[1]*16);g.stroke();});
  // position marker: diamond only, no labels
+ // time digits: top layer, over map, sun, moon, tags, diamond, sweep, grid and stars (flat Liquid Glass lens)
+ var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');glassTime(hh,mm);
  corners(now,S);
  g.save();g.globalAlpha=.06;g.fillStyle='#000';for(var sy=0;sy<H;sy+=3)g.fillRect(0,sy,W,1);g.globalAlpha=1;
  var gp=g.createPattern(grain,'repeat');g.translate(Math.random()*128,Math.random()*128);g.fillStyle=gp;g.fillRect(-128,-128,W+256,H+256);g.restore();
@@ -207,7 +210,7 @@ function corners(now,S){getWx();var se=sunEvent(now,S);
  var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;ichip(34,H-44,'left','rain',[],wx.p==null?'--':wx.p+'%',age>20?AMB:null);
  // bottom-right: device battery (Battery API where the browser has it)
  ichip(W-34,H-44,'right','bat',[batt?batt.level:null,batt&&batt.charging],batt?Math.round(batt.level*100)+'%':'--',batt&&batt.level<.2?ALR:null);
- // top: live place name + next sun event countdown, then local date; bottom: coordinates
+ // top: live place name, then local date; bottom: coordinates
  getPlace();var cd='';if(se[2]){var m=Math.max(0,Math.round((se[2]-now.getTime())/6e4));cd=' \u00b7 SUN'+(se[1]==='RISE'?'RISE':'SET')+' IN '+Math.floor(m/60)+'H'+String(m%60).padStart(2,'0');}
  g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';
  g.fillText(place.name||'SANTANDREI',CX,16);
