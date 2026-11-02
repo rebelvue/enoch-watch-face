@@ -88,8 +88,11 @@ struct FaceView: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 0.1)) { ctx in
             ZStack {
-                Canvas { g, size in draw(&g, size, ctx.date) }
-                GlassTime(date: ctx.date).zIndex(1)   // top layer: digits over map, sun, moon, tags, grid, stars
+                // bottom to top: map + day/night + borders + grid, glass digits, stars + sun + moon + tags, corners and text
+                Canvas { g, size in draw(&g, size, ctx.date, 0) }
+                GlassTime(date: ctx.date).zIndex(1)
+                Canvas { g, size in draw(&g, size, ctx.date, 1) }.zIndex(2).allowsHitTesting(false)
+                Canvas { g, size in draw(&g, size, ctx.date, 2) }.zIndex(3).allowsHitTesting(false)
             }
         }
         .ignoresSafeArea()
@@ -105,7 +108,7 @@ struct FaceView: View {
         .background(Color.black)
     }
 
-    private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date) {
+    private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ layer: Int) {
         let sky = Sky(date: date), d = Double.pi / 180
         let c = CGPoint(x: size.width / 2, y: size.height / 2), R = (min(size.width, size.height) / 2 - 4) * min(fillZoom, max(1, zoom))
         // World of Enoch projection: r = (90 - lat)/180 * R, lon 0 pointing down, east to the right
@@ -113,27 +116,27 @@ struct FaceView: View {
             let r = (90 - lat) / 180 * R; return CGPoint(x: c.x + r * sin(lon * d), y: c.y + r * cos(lon * d)) }
         func dot(_ p: CGPoint, _ r: Double, _ col: Color) { g.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(col)) }
 
+        if layer == 0 {
         // beyond the ice wall: pure black (OLED)
         g.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black))
         // map
         let disc = CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R)
         g.drawLayer { l in
             l.clip(to: Path(ellipseIn: disc))
-            // tactical grading: desaturated olive / slate, geography kept readable
-            var m = l; m.addFilter(.saturation(0.35)); m.addFilter(.brightness(0.08)); m.addFilter(.contrast(1.12)); m.draw(Image("disc"), in: disc)
-            l.blendMode = .multiply; l.fill(Path(ellipseIn: disc), with: .color(Color(red: 0.6, green: 0.65, blue: 0.54))); l.blendMode = .normal
+            // original map, natural colours; lighting below only changes exposure
+            l.draw(Image("disc"), in: disc)
             // night side: solar elevation on the globe, sampled on a coarse grid
-            let n = 40, cell = 2 * R / Double(n), sl = sky.sunLat * d, so = sky.sunLon * d
+            let n = 72, cell = 2 * R / Double(n), sl = sky.sunLat * d, so = sky.sunLon * d
             for j in 0..<n { for i in 0..<n {
                 let dx = (Double(i) + 0.5) / Double(n) * 2 - 1, dy = (Double(j) + 0.5) / Double(n) * 2 - 1, r = hypot(dx, dy)
                 if r > 1.03 { continue }
                 let la = (90 - min(r, 1) * 180) * d, lo = atan2(dx, dy)
                 let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
                 // sun's spotlight, feathered: smoothstep over sun elevation -12 deg (sin -0.208) to +6 deg (sin 0.105)
-                var t = min(1, max(0, (e + 0.208) / 0.313)); t = t * t * (3 - 2 * t)
+                var t = min(1, max(0, (e + 0.309) / 0.517)); t = t * t * (3 - 2 * t)
                 let cellR = Path(CGRect(x: disc.minX + Double(i) * cell, y: disc.minY + Double(j) * cell, width: cell + 0.5, height: cell + 0.5))
-                if t < 1 { l.blendMode = .normal; l.fill(cellR, with: .color(Color(red: 0.02, green: 0.03, blue: 0.05).opacity(0.88 * (1 - t)))) } // night: ~10-15% brightness, near-black slate
-                if t > 0 { l.blendMode = .screen; l.fill(cellR, with: .color(Color(red: 0.6, green: 0.45, blue: 0.14).opacity(0.85 * t))); l.blendMode = .normal } // day: full brightness, warm golden
+                if t < 1 { l.blendMode = .normal; l.fill(cellR, with: .color(.black.opacity(0.9 * (1 - t)))) } // night: ~10% exposure, near black
+                if t > 0 { l.blendMode = .screen; l.fill(cellR, with: .color(Color(white: 0.32).opacity(t))); l.blendMode = .normal } // day: neutral exposure lift, no tint
             } }
             // current country (thin orange) and city (thinner orange) boundaries, projected like the map
             let orange = Color(red: 1, green: 0.55, blue: 0.1)
@@ -142,15 +145,6 @@ struct FaceView: View {
                 p.closeSubpath(); return p }
             if let k = borders.country { for poly in k.polys { for rg in poly { l.stroke(ringPath(rg), with: .color(orange), lineWidth: 0.9) } } }
             for rg in borders.city { l.stroke(ringPath(rg), with: .color(orange.opacity(0.9)), lineWidth: 0.5) }
-            // real stars over the ground point lat = Dec, lon = RA - GST (same as sun and moon); faint by day
-            for st in stars {
-                let r = (90 - st[1]) / 180; if r > 1 { continue }
-                let lo = (st[0] - sky.siderealDeg) * d, e = sin(st[1] * d) * sin(sl) + cos(st[1] * d) * cos(sl) * cos(lo - so)
-                let night = min(1, max(0, (0.08 - e) * 4)), rad = max(0.4, 1.8 - st[2] * 0.32)
-                let p = CGPoint(x: c.x + r * R * sin(lo), y: c.y + r * R * cos(lo))
-                let col = st[3] < 0 ? Color(red: 0.81, green: 0.88, blue: 1) : st[3] < 1.2 ? Color(red: 1, green: 0.96, blue: 0.88) : Color(red: 1, green: 0.79, blue: 0.63)
-                l.fill(Path(ellipseIn: CGRect(x: p.x - rad, y: p.y - rad, width: 2 * rad, height: 2 * rad)), with: .color(col.opacity(min(1, (0.15 + 0.85 * night) * (1.15 - st[2] * 0.18)))))
-            }
             // firmament dome from above: clear crown, pale blue sheen at the rim resting on the ice wall
             l.fill(Path(ellipseIn: disc), with: .radialGradient(Gradient(stops: [
                 .init(color: Color(red: 0.55, green: 0.75, blue: 1).opacity(0.05), location: 0),
@@ -171,9 +165,21 @@ struct FaceView: View {
         for k in 0..<36 { let a = Double(k) * 10 * d, len = k % 3 == 0 ? 6.0 : 3.0; var p = Path()
             p.move(to: CGPoint(x: c.x + (R - len) * sin(a), y: c.y + (R - len) * cos(a))); p.addLine(to: CGPoint(x: c.x + R * sin(a), y: c.y + R * cos(a)))
             g.stroke(p, with: .color(acc), lineWidth: k % 3 == 0 ? 1 : 0.6) }
-
-        // stacked time is drawn by GlassTime (SwiftUI overlay) so it can use Liquid Glass / material
-
+        }
+        if layer == 1 {
+        let disc = CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R), sl = sky.sunLat * d, so = sky.sunLon * d
+        g.drawLayer { l in
+            l.clip(to: Path(ellipseIn: disc))
+            // real stars over the ground point lat = Dec, lon = RA - GST (same as sun and moon); faint by day
+            for st in stars {
+                let r = (90 - st[1]) / 180; if r > 1 { continue }
+                let lo = (st[0] - sky.siderealDeg) * d, e = sin(st[1] * d) * sin(sl) + cos(st[1] * d) * cos(sl) * cos(lo - so)
+                let night = min(1, max(0, (0.08 - e) * 4)), rad = max(0.4, 1.8 - st[2] * 0.32)
+                let p = CGPoint(x: c.x + r * R * sin(lo), y: c.y + r * R * cos(lo))
+                let col = st[3] < 0 ? Color(red: 0.81, green: 0.88, blue: 1) : st[3] < 1.2 ? Color(red: 1, green: 0.96, blue: 0.88) : Color(red: 1, green: 0.79, blue: 0.63)
+                l.fill(Path(ellipseIn: CGRect(x: p.x - rad, y: p.y - rad, width: 2 * rad, height: 2 * rad)), with: .color(col.opacity(min(1, (0.15 + 0.85 * night) * (1.15 - st[2] * 0.18)))))
+            }
+        }
         func tag(_ p: CGPoint, _ t: String, _ col: Color) {
             g.draw(Text(t).font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundColor(col), at: CGPoint(x: p.x + 10, y: p.y - 10), anchor: .leading) }
         // sun: warm corona bloom, anamorphic streak, white-hot limb-darkened photosphere
@@ -194,6 +200,9 @@ struct FaceView: View {
         if let img = shadedMoon(sky.phase) {
             g.draw(Image(decorative: img, scale: 1), in: CGRect(x: mp.x - mr, y: mp.y - mr, width: 2 * mr, height: 2 * mr)) }
         tag(mp, "MOON \(Int((1 - cos(sky.phase)) / 2 * 100))%", amb)
+        }
+        if layer == 2 {
+        let amb = Color(red: 1, green: 0.69, blue: 0.23)
 
         // you: position (no marker; borders and top line show it), LOC and HOME distance / bearing (great circle)
         let la = loc.coord.latitude, lo = loc.coord.longitude
@@ -207,6 +216,7 @@ struct FaceView: View {
         corners(&g, size, date, sky)
         for y in stride(from: 0.0, to: size.height, by: 3) { g.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.06))) }
 
+        }
     }
 
     // ---- four corner complications ----
