@@ -13,3 +13,9 @@ targets:
         WKApplication: true
         WKWatchOnly: true
         NSLocationWhenInUseUsageDescription: Shows your position on the flat-earth map.
+        NSHealthShareUsageDescription: Shows your live heart rate on the watch face.
+    entitlements:
+      path: EnochWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []

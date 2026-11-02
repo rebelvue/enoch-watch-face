@@ -21,6 +21,7 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
 
 struct FaceView: View {
     @StateObject private var loc = Locator()
+    @StateObject private var hr = HeartRate()
     // map zoom: 1 = whole disc, fillZoom = disc covers the whole screen (radius = half the diagonal)
     @AppStorage("enochZoom") private var zoom: Double = 1
     private let fillZoom: Double = {
@@ -140,7 +141,7 @@ struct FaceView: View {
         let mp = P(sky.moonLat, sky.moonLon), mr = 6.0
         if let img = shadedMoon(sky.phase) {
             g.draw(Image(decorative: img, scale: 1), in: CGRect(x: mp.x - mr, y: mp.y - mr, width: 2 * mr, height: 2 * mr)) }
-        tag(mp, "MOON", amb)
+        tag(mp, "MOON \(Int((1 - cos(sky.phase)) / 2 * 100))%", amb)
 
         // you: waypoint diamond, LOC and HOME distance / bearing (great circle)
         let me = P(loc.coord.latitude, loc.coord.longitude), la = loc.coord.latitude, lo = loc.coord.longitude
@@ -174,9 +175,9 @@ struct FaceView: View {
     @State private var wxOk: Date? = nil
     private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
 
-    @discardableResult private func corner(_ g: inout GraphicsContext, _ p: CGPoint, _ anchor: UnitPoint, _ top: String, _ big: String, _ col: Color, _ fs: Double = 16) -> Double {
+    @discardableResult private func corner(_ g: inout GraphicsContext, _ p: CGPoint, _ anchor: UnitPoint, _ top: String, _ big: String, _ col: Color, _ fs: Double = 16, valueColor: Color = .white) -> Double {
         let acc = Color(red: 0.75, green: 0.96, blue: 0.82), mono = { (s: Double, w: Font.Weight) in Font.system(size: s, weight: w, design: .monospaced) }
-        let t1 = g.resolve(Text(top).font(mono(9, .bold)).foregroundColor(acc)), t2 = g.resolve(Text(big).font(mono(fs, .heavy)).foregroundColor(.white))
+        let t1 = g.resolve(Text(top).font(mono(9, .bold)).foregroundColor(acc)), t2 = g.resolve(Text(big).font(mono(fs, .heavy)).foregroundColor(valueColor))
         g.draw(t1, at: p, anchor: anchor); g.draw(t2, at: CGPoint(x: p.x, y: p.y + 16), anchor: anchor)
         // thin bracket frame
         let w = max(t1.measure(in: CGSize(width: 200, height: 40)).width, t2.measure(in: CGSize(width: 200, height: 40)).width) + 8
@@ -202,10 +203,14 @@ struct FaceView: View {
         }
         corner(&g, CGPoint(x: 30, y: 34), .leading, sunTop, sunTxt, Color(red: 0.78, green: 0.47, blue: 0.1))
         // top-right: moon phase name and % lit
-        let f = sky.phase / (2 * .pi), names = ["NEW MOON", "WAXING CRESCENT", "FIRST QUARTER", "WAXING GIBBOUS", "FULL MOON", "WANING GIBBOUS", "LAST QUARTER", "WANING CRESCENT"]
-        let name = (f < 0.03 || f > 0.97 ? names[0] : f < 0.22 ? names[1] : f < 0.28 ? names[2] : f < 0.47 ? names[3] : f < 0.53 ? names[4] : f < 0.72 ? names[5] : f < 0.78 ? names[6] : names[7])
-        let mx = corner(&g, CGPoint(x: size.width - 30, y: 34), .trailing, "MOON \u{00B7} \(Int((1 - cos(sky.phase)) / 2 * 100))% LIT", name, Color(red: 0.29, green: 0.34, blue: 0.5), 10)
-        if let img = shadedMoon(sky.phase) { g.draw(Image(decorative: img, scale: 1), in: CGRect(x: mx - 16, y: 44, width: 12, height: 12)) } // live phase icon
+        // top-right: live heart rate (HealthKit); red only when abnormal (<40 or >120 BPM at rest)
+        let bpm = hr.bpm.flatMap { v in hr.at.map { date.timeIntervalSince($0) < 900 } == true ? v : nil }
+        let hrCol: Color = bpm.map { $0 < 40 || $0 > 120 } == true ? Color(red: 1, green: 0.29, blue: 0.24) : .white
+        let hx = corner(&g, CGPoint(x: size.width - 30, y: 34), .trailing, "HEART RATE", bpm.map { "\($0) BPM" } ?? "--", hrCol, valueColor: hrCol)
+        var pulse = Path(); let py = 50.0
+        pulse.move(to: CGPoint(x: hx - 22, y: py)); pulse.addLine(to: CGPoint(x: hx - 17, y: py)); pulse.addLine(to: CGPoint(x: hx - 14, y: py - 6))
+        pulse.addLine(to: CGPoint(x: hx - 11, y: py + 6)); pulse.addLine(to: CGPoint(x: hx - 8, y: py)); pulse.addLine(to: CGPoint(x: hx - 4, y: py))
+        g.stroke(pulse, with: .color(hrCol == .white ? Color(red: 0.75, green: 0.96, blue: 0.82) : hrCol), lineWidth: 1.2)
         // bottom-left: weekday + day, and temperature (Open-Meteo, free, no key)
         let df = DateFormatter(); df.dateFormat = "EEE d"
         corner(&g, CGPoint(x: 30, y: size.height - 46), .leading, "WEATHER" + (wxOk.map { date.timeIntervalSince($0) > 1200 ? " (\(Int(date.timeIntervalSince($0) / 60)) MIN OLD)" : "" } ?? ""), (temp.map { "\($0)°C" } ?? "--°C") + " \u{00B7} RAIN " + (rain.map { "\($0)%" } ?? "--%"), Color(red: 0.24, green: 0.18, blue: 0.13), 12)

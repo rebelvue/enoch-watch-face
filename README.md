@@ -53,9 +53,9 @@ Generic tactical-map look in the spirit of modern military-shooter minimaps (sty
 
 - Map: the real disc image graded to desaturated olive / slate (filter + multiply tint), live night shade, pure black outside the ice wall.
 - Lines: thin pale-mint range rings (every 30° of latitude), 30° radials, compass ticks every 10° on the rim with longitude labels, a slow radar sweep (decorative only).
-- Markers in amber: `SUN` and `MOON` objective tags; your position as a plain waypoint diamond (no labels). Red only for alerts (battery below 20%).
+- Markers in amber: `SUN` and `MOON nn%` (percent lit) objective tags; your position as a plain waypoint diamond (no labels). Red only for alerts (battery below 20%).
 - Time: stacked HH/MM in JetBrains Mono ExtraBold (self-hosted `jbm800.woff2`, SIL OFL, `OFL-JetBrainsMono.txt`); watchOS uses the system monospaced heavy font. Top line: live place name of your GPS position plus a countdown to the next sunrise/sunset (e.g. `WARSAW · SUNSET IN 4H12`), with the local date under it (`MON 02 NOV 2026`). Bottom line: your coordinates (`FALLBACK` when not live).
-- Corners in plain words: `SUNRISE`/`SUNSET` time; `MOON · nn% LIT` with the full phase name (e.g. `WANING CRESCENT`) and a small live phase icon; `WEATHER 9°C · RAIN 19%`; `BATTERY nn%` with a level bar and a bolt while charging.
+- Corners in plain words: `SUNRISE`/`SUNSET` time; `HEART RATE nn BPM` with a pulse icon (red only below 40 or above 120 BPM; web shows `HEART RATE --` because browsers cannot read heart rate); `WEATHER 9°C · RAIN 19%`; `BATTERY nn%` with a level bar and a bolt while charging.
 - Subtle scanlines and film grain.
 - Sun: white-hot core with limb darkening, warm corona bloom, a short anamorphic streak. Moon: NASA LRO WAC nearside mosaic (public domain, NASA/GSFC/Arizona State University), `moon.webp` / `moon.png` 64 px, Lambert-shaded for the current elongation with a soft terminator, earthshine and limb darkening.
 - Zoom (pinch, double-tap, wheel, Digital Crown) unchanged; digits and corners stay fixed.
@@ -72,5 +72,6 @@ Generic tactical-map look in the spirit of modern military-shooter minimaps (sty
 | Night shade | computed live from the subsolar point |
 | Position | live GPS / browser geolocation (watched continuously); Santandrei only as fallback, labelled `default` (web) / `FALLBACK` (watch) |
 | Weather | fetched from Open-Meteo (free, no key), refreshed every 12 min and when you move; shows data age in minutes if older than 20 min |
+| Heart rate | live on the watch: HealthKit `HKAnchoredObjectQuery` on heart rate (read permission, HealthKit entitlement); not available in browsers, shown as `--` |
 | Battery | live: Battery API in the browser (`BATTERY --` where unsupported), WKInterfaceDevice on the watch |
 | Radar sweep, grain, scanlines | decorative only, carry no data |
