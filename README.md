@@ -46,3 +46,14 @@ These are the same low-precision formulas the main map uses, accurate to about 0
 ## Zoom
 - **Web:** pinch with two fingers, double-tap, or use the mouse wheel or a trackpad pinch to zoom. It moves between the whole-disc view and a fill view where the map covers the whole screen. The last zoom is remembered in localStorage.
 - **Watch:** turn the Digital Crown to zoom, between the same two views, with a click at each end. Double-tap toggles between them. The last zoom is saved with @AppStorage.
+
+## Tactical HUD style
+
+The face is styled as a generic intel-ops situation-room display (no real agency logos, seals or emblems):
+
+- Time: stacked HH/MM in JetBrains Mono ExtraBold (self-hosted `jbm800.woff2`, SIL Open Font License, see `OFL-JetBrainsMono.txt`), white with a phosphor-green glow. On watchOS: system monospaced, heavy.
+- Map overlay: range rings every 30° of latitude from the pole, 30° radials, a slow radar sweep (6 s per turn), rim ticks every 10° with longitude labels.
+- Tags: `SOL` at the subsolar point, `LUNA nn%` at the sublunar point, a crosshair reticle at your position with a `LOC 47.068N 021.855E` readout.
+- Corners: monospaced uppercase codes in thin bracket frames: `SUNRISE`/`SUNSET`, `LUNA WAN CRES 39%`, `WX // PRECIP 9°C 22%`, `PWR 100%` or `HOME RO 00:03` when away.
+- Status line `TS//SCI  EYES ONLY` and a `ZULU hhmmZ` UTC readout.
+- Black OLED background, one accent (phosphor green) plus white. Zoom (pinch, double-tap, wheel, Digital Crown) unchanged; digits and corners stay fixed.
