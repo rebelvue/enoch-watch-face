@@ -49,11 +49,27 @@ These are the same low-precision formulas the main map uses, accurate to about 0
 
 ## Tactical HUD style
 
-The face is styled as a generic intel-ops situation-room display (no real agency logos, seals or emblems):
+Generic tactical-map look in the spirit of modern military-shooter minimaps (style inspiration only: no game or agency logos, seals, fonts or assets).
 
-- Time: stacked HH/MM in JetBrains Mono ExtraBold (self-hosted `jbm800.woff2`, SIL Open Font License, see `OFL-JetBrainsMono.txt`), white with a phosphor-green glow. On watchOS: system monospaced, heavy.
-- Map overlay: range rings every 30° of latitude from the pole, 30° radials, a slow radar sweep (6 s per turn), rim ticks every 10° with longitude labels.
-- Tags: `SOL` at the subsolar point, `LUNA nn%` at the sublunar point, a crosshair reticle at your position with a `LOC 47.068N 021.855E` readout.
-- Corners: monospaced uppercase codes in thin bracket frames: `SUNRISE`/`SUNSET`, `LUNA WAN CRES 39%`, `WX // PRECIP 9°C 22%`, `PWR 100%` or `HOME RO 00:03` when away.
-- Status line `TS//SCI  EYES ONLY` and a `ZULU hhmmZ` UTC readout.
-- Black OLED background, one accent (phosphor green) plus white. Zoom (pinch, double-tap, wheel, Digital Crown) unchanged; digits and corners stay fixed.
+- Map: the real disc image graded to desaturated olive / slate (filter + multiply tint), live night shade, pure black outside the ice wall.
+- Lines: thin pale-mint range rings (every 30° of latitude), 30° radials, compass ticks every 10° on the rim with longitude labels, a slow radar sweep (decorative only).
+- Markers in amber: `SOL` and `LUNA nn%` objective tags; your position as a waypoint diamond with `LOC` and `HOME <km> BRG <deg>` (great-circle distance and bearing to Santandrei). Red only for alerts (battery below 20%).
+- Time: stacked HH/MM in JetBrains Mono ExtraBold (self-hosted `jbm800.woff2`, SIL OFL, `OFL-JetBrainsMono.txt`); watchOS uses the system monospaced heavy font. Status line `TS//SCI  EYES ONLY`, `ZULU hhmmZ`.
+- Corners: white values, mint labels, angled bracket frames: `SUNRISE`/`SUNSET`, `LUNA <phase> nn%`, `WX // PRECIP`, `PWR nn%` with a level bar and a bolt while charging (always battery).
+- Subtle scanlines and film grain.
+- Sun: white-hot core with limb darkening, warm corona bloom, a short anamorphic streak. Moon: NASA LRO WAC nearside mosaic (public domain, NASA/GSFC/Arizona State University), `moon.webp` / `moon.png` 64 px, Lambert-shaded for the current elongation with a soft terminator, earthshine and limb darkening.
+- Zoom (pinch, double-tap, wheel, Digital Crown) unchanged; digits and corners stay fixed.
+
+## Live data: computed vs fetched
+
+| Item | Source |
+|---|---|
+| Local time, ZULU | device clock, every redraw (10 per second) |
+| Sun and moon positions, moon phase and %, sunrise/sunset | computed on the device from the ephemeris at the current instant |
+| Stars | real catalogue: 913 stars of magnitude < 4.5 from the HYG database v4.0 (CC BY-SA 4.0, astronexus/HYG-Database), `stars.json`, placed by RA/Dec, rotated by live sidereal time, colour from B-V |
+| Night shade | computed live from the subsolar point |
+| Position | live GPS / browser geolocation (watched continuously); Santandrei only as fallback, labelled `default` (web) / `FALLBACK` (watch) |
+| HOME distance / bearing | computed (great circle) from the live position |
+| Weather | fetched from Open-Meteo (free, no key), refreshed every 12 min and when you move; shows data age in minutes if older than 20 min |
+| Battery | live: Battery API in the browser (`PWR --` where unsupported), WKInterfaceDevice on the watch |
+| Radar sweep, grain, scanlines | decorative only, carry no data |
