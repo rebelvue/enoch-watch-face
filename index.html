@@ -1,0 +1,70 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Enoch Watch">
+<meta name="theme-color" content="#f6efe3"><title>Enoch Watch Face</title>
+<style>html,body{margin:0;height:100%;background:#f6efe3;font-family:-apple-system,system-ui,sans-serif;color:#5a4632}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.watch{background:#111;border-radius:96px;padding:18px;box-shadow:0 10px 30px rgba(90,70,50,.35)}
+canvas{display:block;border-radius:78px;width:min(82vw,396px);aspect-ratio:396/484;height:auto}
+p{margin:0;font-size:13px;opacity:.75;text-align:center;max-width:90vw}</style></head><body>
+<div class="watch"><canvas id="c" width="396" height="484"></canvas></div>
+<p id="info">World of Enoch watch face</p>
+<script>
+// Projection from World of Enoch: r = (90 - lat)/180 * R, angle = lon; lon 0 points down, east to the right.
+var cv=document.getElementById('c'),g=cv.getContext('2d'),W=396,H=484,dpr=Math.min(3,window.devicePixelRatio||1);
+cv.width=W*dpr;cv.height=H*dpr;g.scale(dpr,dpr);
+var CX=W/2,CY=H/2,R=W/2-6,D=Math.PI/180,pos={lat:52.2241,lon:20.9886,src:'default: Warsaw'};
+var nightCv=document.createElement('canvas');nightCv.width=nightCv.height=96;
+var disc=new Image();disc.src='disc.webp';disc.onload=draw;
+function P(lat,lon){var r=(90-lat)/180*R,a=lon*D;return[CX+r*Math.sin(a),CY+r*Math.cos(a)];}
+// low-precision ephemeris (~0.5 deg): sub-solar / sub-lunar points, sidereal angle, lunar phase
+function sky(ms){var n=ms/864e5-10957.5,e=(23.439-4e-7*n)*D,gst=((280.46061837+360.98564736629*n)%360+360)%360;
+ function eq(l,b){var dec=Math.asin(Math.sin(b)*Math.cos(e)+Math.cos(b)*Math.sin(e)*Math.sin(l));
+  var ra=Math.atan2(Math.sin(l)*Math.cos(e)-Math.tan(b)*Math.sin(e),Math.cos(l));
+  var lo=((ra/D-gst)%360+540)%360-180;return[dec/D,lo];}
+ var gm=(357.528+.9856003*n)*D,ls=(280.46+.9856474*n+1.915*Math.sin(gm)+.02*Math.sin(2*gm))*D;
+ var Mm=(134.963+13.064993*n)*D,F=(93.272+13.22935*n)*D,Dm=(297.85+12.190749*n)*D;
+ var lm=(218.316+13.176396*n+6.289*Math.sin(Mm)+1.274*Math.sin(2*Dm-Mm)+.658*Math.sin(2*Dm))*D,bm=5.128*Math.sin(F)*D;
+ var s=eq(ls,0),m=eq(lm,bm);return{sun:s,moon:m,gst:gst,ph:((lm-ls)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)};}
+var stars=[];(function(){var s=7;function r(){s=(s*16807)%2147483647;return s/2147483647;}
+ for(var i=0;i<260;i++)stars.push([r()*360,Math.sqrt(r())*Math.hypot(W,H)/2,r()*1.3+.3,r()]);})();
+function moonIcon(x,y,rad,ph){g.save();g.beginPath();g.arc(x,y,rad,0,7);g.clip();
+ g.fillStyle='#f4efe0';g.fillRect(x-rad,y-rad,2*rad,2*rad);
+ var f=(1-Math.cos(ph))/2,off=(ph<Math.PI?-1:1)*2*rad*f;g.fillStyle='#2b3050';g.beginPath();g.arc(x+off,y,rad*1.02,0,7);g.fill();
+ g.restore();g.strokeStyle='rgba(255,255,255,.7)';g.lineWidth=1;g.beginPath();g.arc(x,y,rad,0,7);g.stroke();}
+function draw(){var now=new Date(),S=sky(now.getTime());
+ g.fillStyle='#0b1030';g.fillRect(0,0,W,H);
+ // stars turn with sidereal time around the pole
+ g.save();g.translate(CX,CY);g.rotate(-S.gst*D);
+ stars.forEach(function(t){g.globalAlpha=.4+.6*t[3];g.fillStyle=t[3]>.85?'#ffe7b8':'#fff';g.beginPath();var a=t[0]*D;g.arc(t[1]*Math.sin(a),t[1]*Math.cos(a),t[2],0,7);g.fill();});
+ g.restore();g.globalAlpha=1;
+ // map
+ g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();
+ if(disc.complete&&disc.naturalWidth){g.filter='brightness(1.35) saturate(1.25)';g.drawImage(disc,CX-R,CY-R,2*R,2*R);g.filter='none';}
+ // night shade: solar elevation on the real globe per cell, low-res then smoothly upscaled
+ var N=96,sh=nightCv.getContext('2d'),img=sh.createImageData(N,N),sl=S.sun[0]*D,so=S.sun[1]*D;
+ for(var j=0;j<N;j++)for(var i=0;i<N;i++){var dx=(i+.5)/N*2-1,dy=(j+.5)/N*2-1,r=Math.hypot(dx,dy),k=(j*N+i)*4;if(r>1.02)continue;
+  var la=(90-Math.min(r,1)*180)*D,lo=Math.atan2(dx,dy),c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);
+  img.data[k]=8;img.data[k+1]=12;img.data[k+2]=45;img.data[k+3]=Math.round(255*Math.min(.62,Math.max(0,(.08-c)*2.5)));}
+ sh.putImageData(img,0,0);g.imageSmoothingEnabled=true;g.drawImage(nightCv,CX-R,CY-R,2*R,2*R);
+ g.restore();
+ g.strokeStyle='rgba(255,240,210,.5)';g.lineWidth=1.5;g.beginPath();g.arc(CX,CY,R,0,7);g.stroke();
+ // stacked time
+ var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');
+ g.textAlign='center';g.textBaseline='middle';g.font='800 64px -apple-system,system-ui,sans-serif';
+ g.shadowColor='rgba(0,0,0,.55)';g.shadowBlur=10;g.fillStyle='#fff';g.fillText(hh,CX,CY-30);g.fillStyle='#ffd98a';g.fillText(mm,CX,CY+30);g.shadowBlur=0;
+ // sun
+ var p=P(S.sun[0],S.sun[1]),gr=g.createRadialGradient(p[0],p[1],0,p[0],p[1],70);
+ gr.addColorStop(0,'rgba(255,230,150,.6)');gr.addColorStop(1,'rgba(255,230,150,0)');g.fillStyle=gr;g.beginPath();g.arc(p[0],p[1],70,0,7);g.fill();
+ g.fillStyle='#ffc93c';g.strokeStyle='#fff3c4';g.lineWidth=2;g.beginPath();g.arc(p[0],p[1],11,0,7);g.fill();g.stroke();
+ // moon
+ var m=P(S.moon[0],S.moon[1]);moonIcon(m[0],m[1],9,S.ph);
+ // me
+ var q=P(pos.lat,pos.lon);g.fillStyle='rgba(255,80,90,.3)';g.beginPath();g.arc(q[0],q[1],10,0,7);g.fill();
+ g.fillStyle='#ff4d5e';g.strokeStyle='#fff';g.lineWidth=2;g.beginPath();g.arc(q[0],q[1],5,0,7);g.fill();g.stroke();
+ g.font='600 13px -apple-system,system-ui';g.fillStyle='rgba(255,240,215,.85)';
+ g.fillText(now.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'}),CX,26);
+ document.getElementById('info').textContent='Position: '+pos.lat.toFixed(3)+', '+pos.lon.toFixed(3)+' ('+pos.src+')';}
+if(navigator.geolocation)navigator.geolocation.getCurrentPosition(function(r){pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS'};draw();},function(){},{timeout:8000});
+draw();setInterval(draw,1000);
+</script></body></html>

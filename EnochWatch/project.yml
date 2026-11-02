@@ -1,0 +1,15 @@
+# XcodeGen spec: `brew install xcodegen && xcodegen` creates EnochWatch.xcodeproj
+name: EnochWatch
+options: { bundleIdPrefix: ro.rebelvue, deploymentTarget: { watchOS: "10.0" } }
+targets:
+  EnochWatch:
+    type: application
+    platform: watchOS
+    sources: [Sources, Assets.xcassets]
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Enoch Watch
+        WKApplication: true
+        WKWatchOnly: true
+        NSLocationWhenInUseUsageDescription: Shows your position on the flat-earth map.
