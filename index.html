@@ -16,6 +16,13 @@ var cv=document.getElementById('c'),g=cv.getContext('2d'),W=396,H=484,dpr=Math.m
 cv.width=W*dpr;cv.height=H*dpr;g.scale(dpr,dpr);
 var CX=W/2,CY=H/2,R0=W/2-6,R=R0,D=Math.PI/180,pos={lat:47.0682,lon:21.8548,src:'default: Santandrei'};
 var nightCv=document.createElement('canvas');nightCv.width=nightCv.height=96;
+var litCv=document.createElement('canvas');litCv.width=litCv.height=512;var discDay=null,discNight=null;
+function gradeDisc(){if(discDay)return true;if(!disc.complete||!disc.naturalWidth)return false;
+ function mk(f,tint,lift){var c=document.createElement('canvas');c.width=c.height=1024;var x=c.getContext('2d');x.filter=f;x.drawImage(disc,0,0,1024,1024);x.filter='none';
+  x.globalCompositeOperation='multiply';x.fillStyle=tint;x.fillRect(0,0,1024,1024);if(lift){x.globalCompositeOperation='screen';x.fillStyle=lift;x.fillRect(0,0,1024,1024);}return c;}
+ discDay=mk('grayscale(.45) sepia(.55) hue-rotate(22deg) saturate(.95) contrast(1.1) brightness(1.9)','#e6dcb0','rgba(100,94,52,.65)'); // warm-lit olive/khaki
+ discNight=mk('grayscale(.8) sepia(.2) hue-rotate(160deg) saturate(.6) contrast(1.05) brightness(.75)','#55606a'); // dark slate
+ return true;}
 var disc=new Image();disc.src='disc.webp';disc.onload=draw;
 function P(lat,lon){var r=(90-lat)/180*R,a=lon*D;return[CX+r*Math.sin(a),CY+r*Math.cos(a)];}
 // low-precision ephemeris (~0.5 deg): sub-solar / sub-lunar points, sidereal angle, lunar phase
@@ -63,18 +70,51 @@ function gc(a1,o1,a2,o2){var p1=a1*D,p2=a2*D,dl=(o2-o1)*D,dk=2*Math.asin(Math.sq
  b=(Math.atan2(Math.sin(dl)*Math.cos(p2),Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl))/D+360)%360;return [dk,b];}
 var grain=document.createElement('canvas');grain.width=grain.height=128;(function(){var x=grain.getContext('2d'),im=x.createImageData(128,128);
  for(var i=0;i<im.data.length;i+=4){var v=Math.random()*255;im.data[i]=im.data[i+1]=im.data[i+2]=v;im.data[i+3]=14;}x.putImageData(im,0,0);})();
-function draw(){var now=new Date(),S=sky(now.getTime());R=R0*zoom;
+// ?t=2026-11-02T12:00Z previews another moment (testing); default is the live device clock
+var TOFF=(function(){var m=/[?&]t=([^&]+)/.exec(location.search),v=m&&Date.parse(decodeURIComponent(m[1]));return v?v-Date.now():0;})();
+var gl1=document.createElement('canvas'),gl2=document.createElement('canvas');
+var gl3=document.createElement('canvas');
+function glassTime(hh,mm){var FS=170,OY=82,w=cv.width,h=cv.height;
+ [gl1,gl2,gl3].forEach(function(c){if(c.width!==w||c.height!==h){c.width=w;c.height=h;}});
+ var a=gl1.getContext('2d'),b=gl2.getContext('2d'),m=gl3.getContext('2d');
+ m.setTransform(dpr,0,0,dpr,0,0);m.clearRect(0,0,W,H);m.fillStyle='#000';
+ function txt(x,dx,dy){x.textAlign='center';x.textBaseline='middle';x.font='800 '+FS+'px '+MONO;x.fillText(hh,CX+dx,CY-OY+dy);x.fillText(mm,CX+dx,CY+OY+dy);}
+ txt(m,0,0);function mask(x){x.save();x.setTransform(1,0,0,1,0,0);x.globalCompositeOperation='destination-in';x.drawImage(gl3,0,0);x.restore();}
+ // 1) refraction: blurred, brightened, 7% magnified copy of what is under the digits
+ a.setTransform(1,0,0,1,0,0);a.globalCompositeOperation='source-over';a.clearRect(0,0,w,h);a.filter='blur('+(7*dpr)+'px) brightness(1.55) saturate(1.3)';
+ a.translate(CX*dpr,CY*dpr);a.scale(1.07,1.07);a.translate(-CX*dpr,-CY*dpr);a.drawImage(cv,0,0);a.filter='none';
+ a.setTransform(dpr,0,0,dpr,0,0);a.fillStyle='rgba(255,255,255,.32)';a.fillRect(0,0,W,H); // frosted milkiness keeps it legible
+ mask(a);
+ // 2) inner shadow: glyph minus a copy shifted up-left leaves a dark lower-right rim inside the glyph
+ b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.fillStyle='rgba(0,0,0,.55)';txt(b,0,0);
+ b.globalCompositeOperation='destination-out';b.filter='blur('+(2*dpr)+'px)';txt(b,-3,-3);b.filter='none';
+ mask(b);
+ a.globalCompositeOperation='source-over';a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);
+ // 3) specular top-left edge highlight
+ b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.fillStyle='rgba(255,255,255,.95)';txt(b,0,0);
+ b.globalCompositeOperation='destination-out';txt(b,2.2,2.6);
+ a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);
+ // composite: soft drop shadow so the glass lifts off the map, then the glass, then a faint mint rim light
+ g.save();g.shadowColor='rgba(0,0,0,.6)';g.shadowBlur=14;g.shadowOffsetY=3;g.drawImage(gl1,0,0,W,H);g.restore();
+ g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 '+FS+'px '+MONO;g.lineWidth=1.2;g.strokeStyle='rgba(225,255,235,.6)';
+ g.strokeText(hh,CX,CY-OY);g.strokeText(mm,CX,CY+OY);g.restore();}
+function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom;
  // beyond the ice wall: not outer space, a calm warm neutral (the dome rests on the ice wall)
  g.fillStyle='#000';g.fillRect(0,0,W,H);
  // map
  g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();
- if(disc.complete&&disc.naturalWidth){g.filter='grayscale(.6) sepia(.45) hue-rotate(28deg) saturate(.75) contrast(1.12) brightness(1.45)';g.drawImage(disc,CX-R,CY-R,2*R,2*R);g.filter='none';g.globalCompositeOperation='multiply';g.fillStyle='#9aa58a';g.fillRect(CX-R,CY-R,2*R,2*R);g.globalCompositeOperation='source-over';}
- // night shade: solar elevation on the real globe per cell, low-res then smoothly upscaled
+ // day/night: the sun's spotlight lights the region within ~90 deg (great circle) of the subsolar point.
+ // Two graded copies of the map are cached: warm-lit day (olive/khaki) and dark slate night; the day copy is
+ // masked in by solar elevation per cell with a soft terminator, so the lit zone is never covered by night shade.
  var N=96,sh=nightCv.getContext('2d'),img=sh.createImageData(N,N),sl=S.sun[0]*D,so=S.sun[1]*D;
  for(var j=0;j<N;j++)for(var i=0;i<N;i++){var dx=(i+.5)/N*2-1,dy=(j+.5)/N*2-1,r=Math.hypot(dx,dy),k=(j*N+i)*4;if(r>1.02)continue;
   var la=(90-Math.min(r,1)*180)*D,lo=Math.atan2(dx,dy),c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);
-  img.data[k]=10;img.data[k+1]=16;img.data[k+2]=20;img.data[k+3]=Math.round(255*Math.min(.5,Math.max(0,(.08-c)*2.5)));}
- sh.putImageData(img,0,0);g.imageSmoothingEnabled=true;g.drawImage(nightCv,CX-R,CY-R,2*R,2*R);
+  var t=Math.min(1,Math.max(0,(c+.1)/.22));t=t*t*(3-2*t);img.data[k]=img.data[k+1]=img.data[k+2]=255;img.data[k+3]=Math.round(255*t);}
+ sh.putImageData(img,0,0);
+ if(gradeDisc()){g.imageSmoothingEnabled=true;g.drawImage(discNight,CX-R,CY-R,2*R,2*R);
+  var lx=litCv.getContext('2d');lx.globalCompositeOperation='source-over';lx.clearRect(0,0,512,512);lx.drawImage(discDay,0,0,512,512);
+  lx.globalCompositeOperation='destination-in';lx.imageSmoothingEnabled=true;lx.drawImage(nightCv,0,0,512,512);
+  g.drawImage(litCv,CX-R,CY-R,2*R,2*R);}
  // stars inside the firmament, turning around the pole with sidereal time; faint by day, bright at night
  var rot=S.gst*D;
  // real bright stars (HYG, mag<4.5): over the ground point at lat=Dec, lon=RA-GST, like the sun and moon
@@ -100,11 +140,9 @@ function draw(){var now=new Date(),S=sky(now.getTime());R=R0*zoom;
  for(var k=0;k<36;k++){var a=k*10*D,l=k%3?3:7,sx=Math.sin(a),cy_=Math.cos(a);g.lineWidth=k%3?.8:1.2;
   g.beginPath();g.moveTo(CX+(R-l)*sx,CY+(R-l)*cy_);g.lineTo(CX+R*sx,CY+R*cy_);g.stroke();
   if(k%3===0&&k!==9&&k!==27&&R<H/2-14){var lo=k*10>180?k*10-360:k*10;g.fillText(Math.abs(lo).toString().padStart(3,'0')+(lo>0&&lo<180?'E':lo<0?'W':''),CX+(R+9)*sx,CY+(R+9)*cy_);}}
- // stacked time
- var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');
- g.textAlign='center';g.textBaseline='middle';g.font='800 112px '+MONO;
- g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=10;g.fillStyle='#fff';g.fillText(hh,CX,CY-52);g.fillText(mm,CX,CY+52);
- g.shadowColor='rgba(191,245,210,.55)';g.shadowBlur=16;g.fillText(hh,CX,CY-52);g.fillText(mm,CX,CY+52);g.shadowBlur=0;
+ // stacked time: Liquid Glass digits, as large as fits between the corners. The glyphs are a clip mask over a
+ // blurred, slightly magnified copy of the live map (refraction), plus inner shadow, specular edge and faint rim light.
+ var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');glassTime(hh,mm);
  // sun: soft lit glow + tactical tag
  var p=P(S.sun[0],S.sun[1]);sunIcon(p[0],p[1]);
  tag(p[0],p[1],'SUN');
@@ -142,15 +180,35 @@ function chip(x,y,al,top,big,fs){fs=fs||16;g.save();g.textAlign=al;g.textBaselin
  g.shadowBlur=0;g.strokeStyle='rgba(255,255,255,.75)';g.lineWidth=1;g.beginPath();
  [[x0,y0,1,1],[x0+w,y0,-1,1],[x0,y0+h,1,-1],[x0+w,y0+h,-1,-1]].forEach(function(b){g.moveTo(b[0]+b[2]*(c+4),b[1]);g.lineTo(b[0]+b[2]*3,b[1]);g.lineTo(b[0],b[1]+b[3]*3);g.lineTo(b[0],b[1]+b[3]*(c+2));});
  g.stroke();g.restore();return x0;}
-function batTile(x,y){var t=batt?Math.round(batt.level*100)+'%'+(batt.charging?' \u26A1':''):'--';chip(x,y,'right','BATTERY',t);
- if(batt){g.save();g.strokeStyle='rgba(255,255,255,.75)';g.lineWidth=.8;g.strokeRect(x-40,y+29,40,3.5);g.fillStyle=batt.level<.2?'#ff5a5a':ACC;g.fillRect(x-40,y+29,40*batt.level,3.5);g.restore();}}
-function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos(S.ph))/2*100);
- chip(34,46,'left',se[1]==='RISE'?'SUNRISE':se[1]==='SET'?'SUNSET':'SUN',se[0]);
+// HUD icons: original flat line/solid glyphs (tactical-HUD inspired, no game assets), ~20 px, mint with amber accent
+function poly(c,pts,close){c.beginPath();c.moveTo(pts[0][0],pts[0][1]);for(var i=1;i<pts.length;i++)c.lineTo(pts[i][0],pts[i][1]);if(close)c.closePath();}
+var ICON={
+ sun:function(c,up){c.fillStyle=AMB;c.beginPath();c.arc(0,5,5,Math.PI,0);c.closePath();c.fill();
+  c.strokeStyle=AMB;[[-8,1,-6,2.5],[8,1,6,2.5],[-4,-3,-3,-1],[4,-3,3,-1]].forEach(function(r){c.beginPath();c.moveTo(r[0],r[1]);c.lineTo(r[2],r[3]);c.stroke();});
+  c.strokeStyle=ACC;poly(c,[[-10,5.5],[10,5.5]]);c.stroke();poly(c,up?[[-4,-6],[0,-10],[4,-6]]:[[-4,-10],[0,-6],[4,-10]]);c.stroke();},
+ heart:function(c){c.strokeStyle=ACC;poly(c,[[0,8],[-9,-1],[-9,-5],[-6,-8],[-3,-8],[0,-5],[3,-8],[6,-8],[9,-5],[9,-1]],true);c.stroke();
+  c.strokeStyle=AMB;poly(c,[[-11,0],[-5,0],[-3,-4],[0,4],[2,-2],[4,0],[11,0]]);c.stroke();},
+ rain:function(c){c.strokeStyle=ACC;poly(c,[[0,-9],[6,1],[6,4],[3,8],[-3,8],[-6,4],[-6,1]],true);c.stroke();c.strokeStyle=AMB;poly(c,[[-2.5,2],[-2.5,5],[0,6]]);c.stroke();},
+ bat:function(c,lv,chg){var low=lv!=null&&lv<.2,col=low?ALR:ACC;c.strokeStyle=col;c.strokeRect(-11,-5.5,19,11);c.fillStyle=col;c.fillRect(8,-2.5,2.5,5);
+  if(lv!=null)for(var k=0;k<4;k++)if(lv>k/4+.02){c.fillRect(-9.2+k*4.3,-3.7,3.3,7.4);}
+  if(chg){c.fillStyle=AMB;c.strokeStyle='#000';c.lineWidth=1;poly(c,[[0,-9],[-5,1],[-1,1],[-2,9],[4,-2],[0,-2],[1,-9]],true);c.stroke();c.fill();}}};
+// corner tile: icon + value only, inside angled brackets; icon sits on the outer side
+function ichip(x,y,al,icon,args,val,vcol){g.save();g.font='800 16px '+MONO;var tw=g.measureText(val).width,w=22+6+tw+10,h=30,c=6;
+ var x0=al==='left'?x-5:x-w+5,y0=y-h/2,ix=al==='left'?x0+5+11:x0+w-5-11,tx=al==='left'?ix+11+6:ix-11-6;
+ g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=4;g.textAlign=al==='left'?'left':'right';g.textBaseline='middle';g.fillStyle=vcol||'#fff';g.fillText(val,tx,y+1);
+ g.save();g.translate(ix,y);g.lineWidth=1.6;g.lineJoin='miter';ICON[icon].apply(null,[g].concat(args));g.restore();
+ g.shadowBlur=0;g.strokeStyle='rgba(255,255,255,.75)';g.lineWidth=1;g.beginPath();
+ [[x0,y0,1,1],[x0+w,y0,-1,1],[x0,y0+h,1,-1],[x0+w,y0+h,-1,-1]].forEach(function(b){g.moveTo(b[0]+b[2]*(c+4),b[1]);g.lineTo(b[0]+b[2]*3,b[1]);g.lineTo(b[0],b[1]+b[3]*3);g.lineTo(b[0],b[1]+b[3]*(c+2));});
+ g.stroke();g.restore();}
+function corners(now,S){getWx();var se=sunEvent(now,S);
+ // top-left: next sunrise (chevron up) or sunset (chevron down) at your position
+ ichip(34,58,'left','sun',[se[1]!=='SET'],se[0]);
  // top-right: heart rate. Browsers cannot read heart rate, so no value is shown (watch reads HealthKit)
- var hx=chip(W-34,46,'right','HEART RATE','--');g.save();g.strokeStyle=ACC;g.lineWidth=1.3;g.beginPath();g.moveTo(hx-26,63);g.lineTo(hx-20,63);g.lineTo(hx-17,56);g.lineTo(hx-13,70);g.lineTo(hx-10,63);g.lineTo(hx-5,63);g.stroke();g.restore();
- var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;chip(34,H-52,'left','RAIN'+(age>20?' ('+age+' MIN OLD)':''),wx.p==null?'--':wx.p+'%');
+ ichip(W-34,58,'right','heart',[],'--');
+ // bottom-left: chance of rain this hour (amber when the reading is older than 20 min)
+ var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;ichip(34,H-44,'left','rain',[],wx.p==null?'--':wx.p+'%',age>20?AMB:null);
  // bottom-right: device battery (Battery API where the browser has it)
- batTile(W-34,H-52);
+ ichip(W-34,H-44,'right','bat',[batt?batt.level:null,batt&&batt.charging],batt?Math.round(batt.level*100)+'%':'--',batt&&batt.level<.2?ALR:null);
  // top: live place name + next sun event countdown, then local date; bottom: coordinates
  getPlace();var cd='';if(se[2]){var m=Math.max(0,Math.round((se[2]-now.getTime())/6e4));cd=' \u00b7 SUN'+(se[1]==='RISE'?'RISE':'SET')+' IN '+Math.floor(m/60)+'H'+String(m%60).padStart(2,'0');}
  g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';

@@ -38,7 +38,10 @@ struct FaceView: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 0.1)) { ctx in
-            Canvas { g, size in draw(&g, size, ctx.date) }
+            ZStack {
+                Canvas { g, size in draw(&g, size, ctx.date) }
+                GlassTime(date: ctx.date)   // Liquid Glass digits over the live map
+            }
         }
         .ignoresSafeArea()
         .focusable()
@@ -77,9 +80,11 @@ struct FaceView: View {
                 if r > 1.03 { continue }
                 let la = (90 - min(r, 1) * 180) * d, lo = atan2(dx, dy)
                 let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
-                let a = min(0.5, max(0, (0.08 - e) * 2.5)); if a <= 0 { continue }
-                l.fill(Path(CGRect(x: disc.minX + Double(i) * cell, y: disc.minY + Double(j) * cell, width: cell + 0.5, height: cell + 0.5)),
-                       with: .color(Color(red: 0.04, green: 0.06, blue: 0.08).opacity(a)))
+                // sun's spotlight: lit within ~90 deg of the subsolar point, soft terminator (smoothstep)
+                var t = min(1, max(0, (e + 0.1) / 0.22)); t = t * t * (3 - 2 * t)
+                let cellR = Path(CGRect(x: disc.minX + Double(i) * cell, y: disc.minY + Double(j) * cell, width: cell + 0.5, height: cell + 0.5))
+                if t < 1 { l.blendMode = .normal; l.fill(cellR, with: .color(Color(red: 0.05, green: 0.08, blue: 0.11).opacity(0.62 * (1 - t)))) } // night: dark slate
+                if t > 0 { l.blendMode = .screen; l.fill(cellR, with: .color(Color(red: 0.42, green: 0.39, blue: 0.2).opacity(0.75 * t))); l.blendMode = .normal } // day: warm-lit khaki
             } }
             // real stars over the ground point lat = Dec, lon = RA - GST (same as sun and moon); faint by day
             for st in stars {
@@ -114,13 +119,7 @@ struct FaceView: View {
             p.move(to: CGPoint(x: c.x + (R - len) * sin(a), y: c.y + (R - len) * cos(a))); p.addLine(to: CGPoint(x: c.x + R * sin(a), y: c.y + R * cos(a)))
             g.stroke(p, with: .color(acc), lineWidth: k % 3 == 0 ? 1 : 0.6) }
 
-        // stacked time: fixed size (does not zoom), heavy monospaced, white with a phosphor glow
-        let cal = Calendar.current, hh = String(format: "%02d", cal.component(.hour, from: date)), mm = String(format: "%02d", cal.component(.minute, from: date))
-        let base = min(size.width, size.height) / 2 - 4
-        let font = Font.system(size: base * 0.6, weight: .heavy, design: .monospaced)
-        var tg = g; tg.addFilter(.shadow(color: acc.opacity(0.55), radius: 7)); tg.addFilter(.shadow(color: .black.opacity(0.9), radius: 4))
-        tg.draw(Text(hh).font(font).foregroundColor(.white), at: CGPoint(x: c.x, y: c.y - base * 0.28))
-        tg.draw(Text(mm).font(font).foregroundColor(.white), at: CGPoint(x: c.x, y: c.y + base * 0.28))
+        // stacked time is drawn by GlassTime (SwiftUI overlay) so it can use Liquid Glass / material
 
         func tag(_ p: CGPoint, _ t: String, _ col: Color) {
             g.draw(Text(t).font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundColor(col), at: CGPoint(x: p.x + 10, y: p.y - 10), anchor: .leading) }
@@ -175,56 +174,75 @@ struct FaceView: View {
     @State private var wxOk: Date? = nil
     private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
 
-    @discardableResult private func corner(_ g: inout GraphicsContext, _ p: CGPoint, _ anchor: UnitPoint, _ top: String, _ big: String, _ col: Color, _ fs: Double = 16, valueColor: Color = .white) -> Double {
-        let acc = Color(red: 0.75, green: 0.96, blue: 0.82), mono = { (s: Double, w: Font.Weight) in Font.system(size: s, weight: w, design: .monospaced) }
-        let t1 = g.resolve(Text(top).font(mono(9, .bold)).foregroundColor(acc)), t2 = g.resolve(Text(big).font(mono(fs, .heavy)).foregroundColor(valueColor))
-        g.draw(t1, at: p, anchor: anchor); g.draw(t2, at: CGPoint(x: p.x, y: p.y + 16), anchor: anchor)
-        // thin bracket frame
-        let w = max(t1.measure(in: CGSize(width: 200, height: 40)).width, t2.measure(in: CGSize(width: 200, height: 40)).width) + 8
-        let x0 = anchor == .leading ? p.x - 4 : p.x - w + 4, y0 = p.y - 8, h = 32.0, k = 5.0
-        var b = Path()
+    /// CoD MW-inspired original HUD icons (flat, angular), 16x16 box with origin at top-left.
+    private enum Icon { case sun(up: Bool), heart, rain, battery(level: Double, charging: Bool) }
+    private static let mint = Color(red: 0.75, green: 0.96, blue: 0.82), amber = Color(red: 1, green: 0.69, blue: 0.23), alert = Color(red: 1, green: 0.29, blue: 0.24)
+    private func poly(_ o: CGPoint, _ pts: [(Double, Double)], close: Bool = true) -> Path {
+        var p = Path(); p.addLines(pts.map { CGPoint(x: o.x + $0.0, y: o.y + $0.1) }); if close { p.closeSubpath() }; return p }
+    private func drawIcon(_ g: inout GraphicsContext, _ icon: Icon, _ o: CGPoint, alertOn: Bool = false) {
+        let m = FaceView.mint, a = FaceView.amber
+        switch icon {
+        case .sun(let up):
+            var s = Path(); s.addArc(center: CGPoint(x: o.x + 8, y: o.y + 12), radius: 4.5, startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false); s.closeSubpath()
+            g.fill(s, with: .color(a))
+            for k in 0..<5 { let t = Double.pi * (1 + Double(k) / 4); g.stroke(poly(o, [(8 + 6.5 * cos(t), 12 + 6.5 * sin(t)), (8 + 8.5 * cos(t), 12 + 8.5 * sin(t))], close: false), with: .color(a), lineWidth: 1.2) }
+            g.stroke(poly(o, [(0, 12.5), (16, 12.5)], close: false), with: .color(m), lineWidth: 1.4)
+            g.stroke(poly(o, up ? [(5, 3), (8, 0), (11, 3)] : [(5, 0), (8, 3), (11, 0)], close: false), with: .color(m), lineWidth: 1.4)
+        case .heart:
+            let c = alertOn ? FaceView.alert : m
+            g.stroke(poly(o, [(8, 15), (1, 8), (1, 4), (4, 1), (8, 4), (12, 1), (15, 4), (15, 8)]), with: .color(c), lineWidth: 1.4)
+            g.stroke(poly(o, [(2, 8.5), (5.5, 8.5), (7, 5), (9, 12), (10.5, 8.5), (14, 8.5)], close: false), with: .color(alertOn ? c : a), lineWidth: 1.3)
+        case .rain:
+            g.stroke(poly(o, [(8, 0), (13.5, 8), (13.5, 11), (11, 15), (5, 15), (2.5, 11), (2.5, 8)]), with: .color(m), lineWidth: 1.4)
+            g.stroke(poly(o, [(5.5, 10), (6, 12.5), (8, 13)], close: false), with: .color(a), lineWidth: 1.2)
+        case .battery(let lv, let chg):
+            let c = lv >= 0 && lv < 0.2 ? FaceView.alert : m
+            g.stroke(poly(o, [(0, 3), (14, 3), (14, 13), (0, 13)]), with: .color(c), lineWidth: 1.3)
+            g.fill(Path(CGRect(x: o.x + 14.5, y: o.y + 6, width: 1.8, height: 4)), with: .color(c))
+            let n = lv < 0 ? 0 : Int((lv * 4).rounded(.up))
+            for k in 0..<n { g.fill(Path(CGRect(x: o.x + 2 + Double(k) * 3, y: o.y + 5, width: 2.2, height: 6)), with: .color(c)) }
+            if chg { g.fill(poly(o, [(8.5, 0), (4, 9), (7.5, 9), (6, 16), (11, 6.5), (7.5, 6.5)]), with: .color(a)) }
+        }
+    }
+    /// Icon + value chip inside angled brackets; icon on the outer side, value only (no text label).
+    private func chip(_ g: inout GraphicsContext, _ p: CGPoint, leading: Bool, _ icon: Icon, _ val: String, _ vcol: Color, alertOn: Bool = false) {
+        let t = g.resolve(Text(val).font(.system(size: 15, weight: .heavy, design: .monospaced)).foregroundColor(vcol))
+        let tw = t.measure(in: CGSize(width: 200, height: 40)).width, w = 16 + 5 + tw + 10, h = 26.0
+        let x0 = leading ? p.x - 5 : p.x - w + 5, y0 = p.y - h / 2
+        let ix = leading ? x0 + 5 : x0 + w - 21
+        drawIcon(&g, icon, CGPoint(x: ix, y: p.y - 8), alertOn: alertOn)
+        g.draw(t, at: CGPoint(x: leading ? ix + 21 : ix - 5, y: p.y), anchor: leading ? .leading : .trailing)
+        var b = Path(); let k = 5.0
         for (x, y, sx, sy) in [(x0, y0, 1.0, 1.0), (x0 + w, y0, -1, 1), (x0, y0 + h, 1, -1), (x0 + w, y0 + h, -1, -1)] {
             b.move(to: CGPoint(x: x + sx * (k + 3), y: y)); b.addLine(to: CGPoint(x: x + sx * 3, y: y)); b.addLine(to: CGPoint(x: x, y: y + sy * 3)); b.addLine(to: CGPoint(x: x, y: y + sy * (k + 1))) }
         g.stroke(b, with: .color(.white.opacity(0.75)), lineWidth: 0.8)
-        return x0
     }
 
     private func corners(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ sky: Sky) {
         let me = loc.coord, d = Double.pi / 180, tf = DateFormatter(); tf.dateFormat = "HH:mm"
         // top-left: next sunrise/sunset here, from the subsolar point
-        var sunTop = "SUN", sunTxt = "--"
+        var up = true, sunTxt = "--"
         let cc = (sin(-0.833 * d) - sin(me.latitude * d) * sin(sky.sunLat * d)) / (cos(me.latitude * d) * cos(sky.sunLat * d))
         if abs(cc) <= 1 {
             let h0 = acos(cc) / d / 15, dn = ((sky.sunLon - me.longitude) / 15).truncatingRemainder(dividingBy: 24)
             let dn2 = dn > 12 ? dn - 24 : (dn < -12 ? dn + 24 : dn), noon = date.addingTimeInterval(dn2 * 3600)
-            let ev = (-1...1).flatMap { k in [(noon.addingTimeInterval(Double(k) * 86400 - h0 * 3600), "SUNRISE"), (noon.addingTimeInterval(Double(k) * 86400 + h0 * 3600), "SUNSET")] }
+            let ev = (-1...1).flatMap { k in [(noon.addingTimeInterval(Double(k) * 86400 - h0 * 3600), true), (noon.addingTimeInterval(Double(k) * 86400 + h0 * 3600), false)] }
                 .filter { $0.0 > date }.sorted { $0.0 < $1.0 }
-            if let e = ev.first { sunTop = e.1; sunTxt = tf.string(from: e.0) }
+            if let e = ev.first { up = e.1; sunTxt = tf.string(from: e.0) }
         }
-        corner(&g, CGPoint(x: 30, y: 34), .leading, sunTop, sunTxt, Color(red: 0.78, green: 0.47, blue: 0.1))
-        // top-right: moon phase name and % lit
-        // top-right: live heart rate (HealthKit); red only when abnormal (<40 or >120 BPM at rest)
+        chip(&g, CGPoint(x: 26, y: 46), leading: true, .sun(up: up), sunTxt, .white)
+        // top-right: live heart rate (HealthKit); red only when abnormal (<40 or >120 BPM)
         let bpm = hr.bpm.flatMap { v in hr.at.map { date.timeIntervalSince($0) < 900 } == true ? v : nil }
-        let hrCol: Color = bpm.map { $0 < 40 || $0 > 120 } == true ? Color(red: 1, green: 0.29, blue: 0.24) : .white
-        let hx = corner(&g, CGPoint(x: size.width - 30, y: 34), .trailing, "HEART RATE", bpm.map { "\($0) BPM" } ?? "--", hrCol, valueColor: hrCol)
-        var pulse = Path(); let py = 50.0
-        pulse.move(to: CGPoint(x: hx - 22, y: py)); pulse.addLine(to: CGPoint(x: hx - 17, y: py)); pulse.addLine(to: CGPoint(x: hx - 14, y: py - 6))
-        pulse.addLine(to: CGPoint(x: hx - 11, y: py + 6)); pulse.addLine(to: CGPoint(x: hx - 8, y: py)); pulse.addLine(to: CGPoint(x: hx - 4, y: py))
-        g.stroke(pulse, with: .color(hrCol == .white ? Color(red: 0.75, green: 0.96, blue: 0.82) : hrCol), lineWidth: 1.2)
-        // bottom-left: weekday + day, and temperature (Open-Meteo, free, no key)
-        let df = DateFormatter(); df.dateFormat = "EEE d"
-        corner(&g, CGPoint(x: 30, y: size.height - 46), .leading, "RAIN" + (wxOk.map { date.timeIntervalSince($0) > 1200 ? " (\(Int(date.timeIntervalSince($0) / 60)) MIN OLD)" : "" } ?? ""), rain.map { "\($0)%" } ?? "--", Color(red: 0.24, green: 0.18, blue: 0.13))
+        let bad = bpm.map { $0 < 40 || $0 > 120 } == true
+        chip(&g, CGPoint(x: size.width - 26, y: 46), leading: false, .heart, bpm.map { "\($0)" } ?? "--", bad ? FaceView.alert : .white, alertOn: bad)
+        // bottom-left: rain chance (Open-Meteo, free, no key); amber when older than 20 min
+        let stale = wxOk.map { date.timeIntervalSince($0) > 1200 } ?? false
+        chip(&g, CGPoint(x: 26, y: size.height - 34), leading: true, .rain, rain.map { "\($0)%" } ?? "--", stale ? FaceView.amber : .white)
         if date.timeIntervalSince(wxAt) > 720 { DispatchQueue.main.async { fetchTemp(me) } }
-        // bottom-right: battery here; HOME (Santandrei) time instead when you are away from home
-        // bottom-right: watch battery, always (level bar, bolt while charging)
+        // bottom-right: watch battery (segments, bolt while charging, red below 20%)
         let dev = WKInterfaceDevice.current(); dev.isBatteryMonitoringEnabled = true
-        let b = dev.batteryLevel, chg = dev.batteryState == .charging || dev.batteryState == .full
-        let bp = CGPoint(x: size.width - 30, y: size.height - 46)
-        corner(&g, bp, .trailing, "BATTERY", b < 0 ? "--" : "\(Int(b * 100))%" + (chg ? " \u{26A1}" : ""), .white)
-        if b >= 0 {
-            g.stroke(Path(CGRect(x: bp.x - 34, y: bp.y + 27, width: 34, height: 3)), with: .color(.white.opacity(0.75)), lineWidth: 0.7)
-            g.fill(Path(CGRect(x: bp.x - 34, y: bp.y + 27, width: 34 * Double(b), height: 3)), with: .color(b < 0.2 ? Color(red: 1, green: 0.29, blue: 0.24) : Color(red: 0.75, green: 0.96, blue: 0.82)))
-        }
+        let b = Double(dev.batteryLevel), chg = dev.batteryState == .charging || dev.batteryState == .full
+        chip(&g, CGPoint(x: size.width - 26, y: size.height - 34), leading: false, .battery(level: b, charging: chg), b < 0 ? "--" : "\(Int(b * 100))%", b >= 0 && b < 0.2 ? FaceView.alert : .white)
     }
     }
 
@@ -257,3 +275,37 @@ struct FaceView: View {
 }
 
 @main struct EnochWatchApp: App { var body: some Scene { WindowGroup { FaceView() } } }
+
+/// Stacked HH over MM, as large as fits between the corners, in a translucent "Liquid Glass" style:
+/// the map shows through the glyphs. watchOS 26+: real .glassEffect masked by the digits; earlier: .ultraThinMaterial.
+struct GlassTime: View {
+    let date: Date
+    var body: some View {
+        GeometryReader { geo in
+            let cal = Calendar.current
+            let hh = String(format: "%02d", cal.component(.hour, from: date)), mm = String(format: "%02d", cal.component(.minute, from: date))
+            // monospaced digit is ~0.6 em wide; leave room for the corner tiles at the sides and top/bottom lines
+            let fs = min(geo.size.width * 0.78 / 1.2, geo.size.height * 0.36)
+            let digits = VStack(spacing: -fs * 0.18) { Text(hh); Text(mm) }
+                .font(.system(size: fs, weight: .heavy, design: .monospaced)).monospacedDigit()
+            ZStack {
+                glass.mask(digits)                                                     // translucent body
+                digits.foregroundStyle(.white.opacity(0.18))                           // keeps it legible on bright day zones
+                // specular edge highlight: digits minus a shifted copy leaves a thin top-left rim
+                digits.foregroundStyle(.clear)
+                    .overlay(digits.foregroundStyle(LinearGradient(colors: [.white.opacity(0.9), .white.opacity(0.1)], startPoint: .top, endPoint: .bottom))
+                        .mask(digits.foregroundStyle(.white).overlay(digits.foregroundStyle(.black).offset(x: 1.2, y: 1.6).blendMode(.destinationOut)).compositingGroup()))
+            }
+            .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .allowsHitTesting(false)
+    }
+    @ViewBuilder private var glass: some View {
+        if #available(watchOS 26.0, *) {
+            Rectangle().fill(.clear).glassEffect(.clear, in: Rectangle())
+        } else {
+            Rectangle().fill(.ultraThinMaterial)
+        }
+    }
+}

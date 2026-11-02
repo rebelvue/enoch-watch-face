@@ -55,7 +55,9 @@ Generic tactical-map look in the spirit of modern military-shooter minimaps (sty
 - Lines: thin pale-mint range rings (every 30° of latitude), 30° radials, compass ticks every 10° on the rim with longitude labels, a slow radar sweep (decorative only).
 - Markers in amber: `SUN` and `MOON nn%` (percent lit) objective tags; your position as a plain waypoint diamond (no labels). Red only for alerts (battery below 20%).
 - Time: stacked HH/MM in JetBrains Mono ExtraBold (self-hosted `jbm800.woff2`, SIL OFL, `OFL-JetBrainsMono.txt`); watchOS uses the system monospaced heavy font. Top line: live place name of your GPS position plus a countdown to the next sunrise/sunset (e.g. `WARSAW · SUNSET IN 4H12`), with the local date under it (`MON 02 NOV 2026`). Bottom line: your coordinates (`FALLBACK` when not live).
-- Corners in plain words: `SUNRISE`/`SUNSET` time; `HEART RATE nn BPM` with a pulse icon (red only below 40 or above 120 BPM; web shows `HEART RATE --` because browsers cannot read heart rate); `RAIN nn%` (precipitation chance for the coming hour); `BATTERY nn%` with a level bar and a bolt while charging.
+- Corners are icons with values only, no text labels (original CoD MW-style flat angular HUD icons, mint with amber accent, drawn as vector paths on the canvas and as SwiftUI Paths): half sun on a horizon with an up/down chevron + next sunrise/sunset time; angular heart with ECG line + BPM (red only below 40 or above 120; `--` on the web because browsers cannot read heart rate); angular drop + rain chance for the coming hour (amber when older than 20 min); battery cell with fill segments, a bolt while charging, red below 20%.
+- Time: large stacked HH over MM in Liquid Glass. Web: the digits clip a blurred, brightened, slightly magnified copy of the map, with frost, inner shadow, specular top-left edge, drop shadow and a rim light. Watch: `.glassEffect()` on watchOS 26 (behind `#available`), else `.ultraThinMaterial` masked by the digits, with a stroke highlight.
+- Day/night: the region within about 90 degrees of the subsolar point is drawn from a warm lit (olive/khaki) copy of the map, the rest from a dark slate night copy, blended by solar elevation with a soft terminator. Preview any time with `?t=2026-11-03T12:00Z`.
 - Subtle scanlines and film grain.
 - Sun: white-hot core with limb darkening, warm corona bloom, a short anamorphic streak. Moon: NASA LRO WAC nearside mosaic (public domain, NASA/GSFC/Arizona State University), `moon.webp` / `moon.png` 64 px, Lambert-shaded for the current elongation with a soft terminator, earthshine and limb darkening.
 - Zoom (pinch, double-tap, wheel, Digital Crown) unchanged; digits and corners stay fixed.
@@ -73,5 +75,5 @@ Generic tactical-map look in the spirit of modern military-shooter minimaps (sty
 | Position | live GPS / browser geolocation (watched continuously); Santandrei only as fallback, labelled `default` (web) / `FALLBACK` (watch) |
 | Weather | fetched from Open-Meteo (free, no key), refreshed every 12 min and when you move; shows data age in minutes if older than 20 min |
 | Heart rate | live on the watch: HealthKit `HKAnchoredObjectQuery` on heart rate (read permission, HealthKit entitlement); not available in browsers, shown as `--` |
-| Battery | live: Battery API in the browser (`BATTERY --` where unsupported), WKInterfaceDevice on the watch |
+| Battery | live: Battery API in the browser (`--` where unsupported), WKInterfaceDevice on the watch |
 | Radar sweep, grain, scanlines | decorative only, carry no data |
