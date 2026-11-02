@@ -123,7 +123,7 @@ function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
   b.strokeStyle=gr;each(b,0,0,b.strokeText);mask(b);
   a.globalCompositeOperation='source-over';a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);}
  g.drawImage(gl1,0,0,W,H);}
-function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom;
+function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom;window.__sky={t:now.getTime(),sun:S.sun,moon:S.moon,gst:S.gst};
  // beyond the ice wall: not outer space, a calm warm neutral (the dome rests on the ice wall)
  g.fillStyle='#000';g.fillRect(0,0,W,H);
  // map
@@ -161,7 +161,7 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  // stars inside the firmament, turning around the pole with sidereal time; faint by day, bright at night
  var rot=S.gst*D;
  // real bright stars (HYG, mag<4.5): over the ground point at lat=Dec, lon=RA-GST, like the sun and moon
- stars.forEach(function(t){var lo=((t[0]-S.gst)%360+540)%360-180,r=(90-t[1])/180;if(r>1)return;var a=lo*D;
+ stars.forEach(function(t,ix){var lo=((t[0]-S.gst)%360+540)%360-180,r=(90-t[1])/180;if(r>1)return;var a=lo*D;if(!ix)window.__sky.star0=[CX+r*R*Math.sin(a),CY+r*R*Math.cos(a)];
   var n=nightAt(r,a,sl,so);g.globalAlpha=Math.min(1,(.15+.85*n)*(1.15-t[2]*.18));
   var ci=t[3];g.fillStyle=ci<0?'#cfe0ff':ci<.6?'#fffaf0':ci<1.2?'#ffe7c0':'#ffc9a0';
   g.beginPath();g.arc(CX+r*R*Math.sin(a),CY+r*R*Math.cos(a),Math.max(.45,2.1-t[2]*.38),0,7);g.fill();});
