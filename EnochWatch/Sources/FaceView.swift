@@ -134,13 +134,13 @@ struct FaceView: View {
         g.fill(Path(ellipseIn: CGRect(x: sp.x - 4.5, y: sp.y - 4.5, width: 9, height: 9)), with: .radialGradient(Gradient(stops: [
             .init(color: .white, location: 0), .init(color: Color(red: 1, green: 0.96, blue: 0.86), location: 0.55), .init(color: Color(red: 1, green: 0.82, blue: 0.48), location: 0.85),
             .init(color: Color(red: 0.95, green: 0.6, blue: 0.23), location: 1)]), center: sp, startRadius: 0, endRadius: 4.5))
-        tag(sp, "SOL", amb)
+        tag(sp, "SUN", amb)
 
         // moon: NASA LRO nearside texture, sphere-shaded terminator, earthshine and limb darkening
         let mp = P(sky.moonLat, sky.moonLon), mr = 6.0
         if let img = shadedMoon(sky.phase) {
             g.draw(Image(decorative: img, scale: 1), in: CGRect(x: mp.x - mr, y: mp.y - mr, width: 2 * mr, height: 2 * mr)) }
-        tag(mp, "LUNA \(Int((1 - cos(sky.phase)) / 2 * 100))%", amb)
+        tag(mp, "MOON", amb)
 
         // you: waypoint diamond, LOC and HOME distance / bearing (great circle)
         let me = P(loc.coord.latitude, loc.coord.longitude), la = loc.coord.latitude, lo = loc.coord.longitude
@@ -174,9 +174,9 @@ struct FaceView: View {
     @State private var wxOk: Date? = nil
     private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
 
-    private func corner(_ g: inout GraphicsContext, _ p: CGPoint, _ anchor: UnitPoint, _ top: String, _ big: String, _ col: Color) {
+    @discardableResult private func corner(_ g: inout GraphicsContext, _ p: CGPoint, _ anchor: UnitPoint, _ top: String, _ big: String, _ col: Color, _ fs: Double = 16) -> Double {
         let acc = Color(red: 0.75, green: 0.96, blue: 0.82), mono = { (s: Double, w: Font.Weight) in Font.system(size: s, weight: w, design: .monospaced) }
-        let t1 = g.resolve(Text(top).font(mono(9, .bold)).foregroundColor(acc)), t2 = g.resolve(Text(big).font(mono(16, .heavy)).foregroundColor(.white))
+        let t1 = g.resolve(Text(top).font(mono(9, .bold)).foregroundColor(acc)), t2 = g.resolve(Text(big).font(mono(fs, .heavy)).foregroundColor(.white))
         g.draw(t1, at: p, anchor: anchor); g.draw(t2, at: CGPoint(x: p.x, y: p.y + 16), anchor: anchor)
         // thin bracket frame
         let w = max(t1.measure(in: CGSize(width: 200, height: 40)).width, t2.measure(in: CGSize(width: 200, height: 40)).width) + 8
@@ -185,6 +185,7 @@ struct FaceView: View {
         for (x, y, sx, sy) in [(x0, y0, 1.0, 1.0), (x0 + w, y0, -1, 1), (x0, y0 + h, 1, -1), (x0 + w, y0 + h, -1, -1)] {
             b.move(to: CGPoint(x: x + sx * (k + 3), y: y)); b.addLine(to: CGPoint(x: x + sx * 3, y: y)); b.addLine(to: CGPoint(x: x, y: y + sy * 3)); b.addLine(to: CGPoint(x: x, y: y + sy * (k + 1))) }
         g.stroke(b, with: .color(.white.opacity(0.75)), lineWidth: 0.8)
+        return x0
     }
 
     private func corners(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ sky: Sky) {
@@ -199,21 +200,22 @@ struct FaceView: View {
                 .filter { $0.0 > date }.sorted { $0.0 < $1.0 }
             if let e = ev.first { sunTop = e.1; sunTxt = tf.string(from: e.0) }
         }
-        corner(&g, CGPoint(x: 30, y: 26), .leading, sunTop, sunTxt, Color(red: 0.78, green: 0.47, blue: 0.1))
+        corner(&g, CGPoint(x: 30, y: 34), .leading, sunTop, sunTxt, Color(red: 0.78, green: 0.47, blue: 0.1))
         // top-right: moon phase name and % lit
-        let f = sky.phase / (2 * .pi), names = ["NEW", "WAX CRES", "1ST QTR", "WAX GIBB", "FULL", "WAN GIBB", "3RD QTR", "WAN CRES"]
-        let name = "LUNA " + (f < 0.03 || f > 0.97 ? names[0] : f < 0.22 ? names[1] : f < 0.28 ? names[2] : f < 0.47 ? names[3] : f < 0.53 ? names[4] : f < 0.72 ? names[5] : f < 0.78 ? names[6] : names[7])
-        corner(&g, CGPoint(x: size.width - 30, y: 26), .trailing, name, "\(Int((1 - cos(sky.phase)) / 2 * 100))%", Color(red: 0.29, green: 0.34, blue: 0.5))
+        let f = sky.phase / (2 * .pi), names = ["NEW MOON", "WAXING CRESCENT", "FIRST QUARTER", "WAXING GIBBOUS", "FULL MOON", "WANING GIBBOUS", "LAST QUARTER", "WANING CRESCENT"]
+        let name = (f < 0.03 || f > 0.97 ? names[0] : f < 0.22 ? names[1] : f < 0.28 ? names[2] : f < 0.47 ? names[3] : f < 0.53 ? names[4] : f < 0.72 ? names[5] : f < 0.78 ? names[6] : names[7])
+        let mx = corner(&g, CGPoint(x: size.width - 30, y: 34), .trailing, "MOON \u{00B7} \(Int((1 - cos(sky.phase)) / 2 * 100))% LIT", name, Color(red: 0.29, green: 0.34, blue: 0.5), 10)
+        if let img = shadedMoon(sky.phase) { g.draw(Image(decorative: img, scale: 1), in: CGRect(x: mx - 16, y: 44, width: 12, height: 12)) } // live phase icon
         // bottom-left: weekday + day, and temperature (Open-Meteo, free, no key)
         let df = DateFormatter(); df.dateFormat = "EEE d"
-        corner(&g, CGPoint(x: 30, y: size.height - 46), .leading, "WX // PRECIP" + (wxOk.map { date.timeIntervalSince($0) > 1200 ? " \(Int(date.timeIntervalSince($0) / 60))M" : "" } ?? ""), (temp.map { "\($0)°C" } ?? "--°C") + " " + (rain.map { "\($0)%" } ?? "--%"), Color(red: 0.24, green: 0.18, blue: 0.13))
+        corner(&g, CGPoint(x: 30, y: size.height - 46), .leading, "WEATHER" + (wxOk.map { date.timeIntervalSince($0) > 1200 ? " (\(Int(date.timeIntervalSince($0) / 60)) MIN OLD)" : "" } ?? ""), (temp.map { "\($0)°C" } ?? "--°C") + " \u{00B7} RAIN " + (rain.map { "\($0)%" } ?? "--%"), Color(red: 0.24, green: 0.18, blue: 0.13), 12)
         if date.timeIntervalSince(wxAt) > 720 { DispatchQueue.main.async { fetchTemp(me) } }
         // bottom-right: battery here; HOME (Santandrei) time instead when you are away from home
         // bottom-right: watch battery, always (level bar, bolt while charging)
         let dev = WKInterfaceDevice.current(); dev.isBatteryMonitoringEnabled = true
         let b = dev.batteryLevel, chg = dev.batteryState == .charging || dev.batteryState == .full
         let bp = CGPoint(x: size.width - 30, y: size.height - 46)
-        corner(&g, bp, .trailing, "PWR", b < 0 ? "--" : "\(Int(b * 100))%" + (chg ? " \u{26A1}" : ""), .white)
+        corner(&g, bp, .trailing, "BATTERY", b < 0 ? "--" : "\(Int(b * 100))%" + (chg ? " \u{26A1}" : ""), .white)
         if b >= 0 {
             g.stroke(Path(CGRect(x: bp.x - 34, y: bp.y + 27, width: 34, height: 3)), with: .color(.white.opacity(0.75)), lineWidth: 0.7)
             g.fill(Path(CGRect(x: bp.x - 34, y: bp.y + 27, width: 34 * Double(b), height: 3)), with: .color(b < 0.2 ? Color(red: 1, green: 0.29, blue: 0.24) : Color(red: 0.75, green: 0.96, blue: 0.82)))

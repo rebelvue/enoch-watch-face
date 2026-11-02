@@ -107,8 +107,8 @@ function draw(){var now=new Date(),S=sky(now.getTime());R=R0*zoom;
  g.shadowColor='rgba(191,245,210,.55)';g.shadowBlur=16;g.fillText(hh,CX,CY-52);g.fillText(mm,CX,CY+52);g.shadowBlur=0;
  // sun: soft lit glow + tactical tag
  var p=P(S.sun[0],S.sun[1]);sunIcon(p[0],p[1]);
- tag(p[0],p[1],'SOL');
- var m=P(S.moon[0],S.moon[1]);moonIcon(m[0],m[1],8,S.ph);tag(m[0],m[1],'LUNA '+Math.round((1-Math.cos(S.ph))/2*100)+'%');
+ tag(p[0],p[1],'SUN');
+ var m=P(S.moon[0],S.moon[1]);moonIcon(m[0],m[1],8,S.ph);tag(m[0],m[1],'MOON');
  // position: reticle + readout
  var q=P(pos.lat,pos.lon),x=q[0],y=q[1];g.lineWidth=1.4;diamond(x,y,8,AMB,'rgba(255,177,59,.18)');diamond(x,y,2.5,'#fff','#fff');
  g.strokeStyle='rgba(255,177,59,.7)';g.lineWidth=1;[[1,0],[-1,0],[0,1],[0,-1]].forEach(function(v){g.beginPath();g.moveTo(x+v[0]*11,y+v[1]*11);g.lineTo(x+v[0]*16,y+v[1]*16);g.stroke();});
@@ -132,22 +132,22 @@ function sunEvent(now,S){ // next sunrise/sunset at pos, from subsolar point (lo
  for(var k=-1;k<=1;k++){ev.push([noon+k*864e5-h0*36e5,'RISE']);ev.push([noon+k*864e5+h0*36e5,'SET']);}
  ev=ev.filter(function(e){return e[0]>now.getTime();}).sort(function(a,b){return a[0]-b[0];});
  return[fmt(new Date(ev[0][0])),ev[0][1],ev[0][0]];}
-function moonName(p){var f=p/(2*Math.PI);return f<.03||f>.97?'NEW':f<.22?'WAX CRES':f<.28?'1ST QTR':f<.47?'WAX GIBB':f<.53?'FULL':f<.72?'WAN GIBB':f<.78?'3RD QTR':'WAN CRES';}
+function moonName(p){var f=p/(2*Math.PI);return f<.03||f>.97?'NEW MOON':f<.22?'WAXING CRESCENT':f<.28?'FIRST QUARTER':f<.47?'WAXING GIBBOUS':f<.53?'FULL MOON':f<.72?'WANING GIBBOUS':f<.78?'LAST QUARTER':'WANING CRESCENT';}
 function getWx(){if(Date.now()-wx.at<72e4)return;wx.at=Date.now();
  fetch('https://api.open-meteo.com/v1/forecast?latitude='+pos.lat.toFixed(3)+'&longitude='+pos.lon.toFixed(3)+'&current=temperature_2m&hourly=precipitation_probability&forecast_hours=1').then(function(r){return r.json();}).then(function(j){wx.t=Math.round(j.current.temperature_2m);wx.ok=Date.now();wx.p=(j.hourly&&j.hourly.precipitation_probability)?j.hourly.precipitation_probability[0]:null;}).catch(function(){});}
 var batt=null;if(navigator.getBattery)navigator.getBattery().then(function(b){batt=b;}).catch(function(){});
-function chip(x,y,al,top,big){g.save();g.textAlign=al;g.textBaseline='middle';g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=4;
- g.font='700 9px '+MONO;var w=Math.max(g.measureText(top).width,(g.font='800 16px '+MONO,g.measureText(big).width))+10,x0=al==='left'?x-5:x-w+5,y0=y-9,h=34,c=6;
- g.font='700 9px '+MONO;g.fillStyle=ACC;g.fillText(top,x,y);g.font='800 16px '+MONO;g.fillStyle='#fff';g.fillText(big,x,y+17);
+function chip(x,y,al,top,big,fs){fs=fs||16;g.save();g.textAlign=al;g.textBaseline='middle';g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=4;
+ g.font='700 9px '+MONO;var w=Math.max(g.measureText(top).width,(g.font='800 '+fs+'px '+MONO,g.measureText(big).width))+10,x0=al==='left'?x-5:x-w+5,y0=y-9,h=34,c=6;
+ g.font='700 9px '+MONO;g.fillStyle=ACC;g.fillText(top,x,y);g.font='800 '+fs+'px '+MONO;g.fillStyle='#fff';g.fillText(big,x,y+17);
  g.shadowBlur=0;g.strokeStyle='rgba(255,255,255,.75)';g.lineWidth=1;g.beginPath();
  [[x0,y0,1,1],[x0+w,y0,-1,1],[x0,y0+h,1,-1],[x0+w,y0+h,-1,-1]].forEach(function(b){g.moveTo(b[0]+b[2]*(c+4),b[1]);g.lineTo(b[0]+b[2]*3,b[1]);g.lineTo(b[0],b[1]+b[3]*3);g.lineTo(b[0],b[1]+b[3]*(c+2));});
- g.stroke();g.restore();}
-function batTile(x,y){var t=batt?Math.round(batt.level*100)+'%'+(batt.charging?' \u26A1':''):'--';chip(x,y,'right','PWR',t);
+ g.stroke();g.restore();return x0;}
+function batTile(x,y){var t=batt?Math.round(batt.level*100)+'%'+(batt.charging?' \u26A1':''):'--';chip(x,y,'right','BATTERY',t);
  if(batt){g.save();g.strokeStyle='rgba(255,255,255,.75)';g.lineWidth=.8;g.strokeRect(x-40,y+29,40,3.5);g.fillStyle=batt.level<.2?'#ff5a5a':ACC;g.fillRect(x-40,y+29,40*batt.level,3.5);g.restore();}}
 function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos(S.ph))/2*100);
- chip(34,30,'left',se[1]==='RISE'?'SUNRISE':se[1]==='SET'?'SUNSET':'SUN',se[0]);
- chip(W-34,30,'right','LUNA '+moonName(S.ph),il+'%');
- var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;chip(34,H-52,'left','WX // PRECIP'+(age>20?' '+age+'M':''),(wx.t==null?'--':wx.t)+'°C '+(wx.p==null?'--':wx.p)+'%');
+ chip(34,46,'left',se[1]==='RISE'?'SUNRISE':se[1]==='SET'?'SUNSET':'SUN',se[0]);
+ var mx=chip(W-34,46,'right','MOON \u00b7 '+il+'% LIT',moonName(S.ph),12);moonIcon(mx-12,63,8,S.ph);
+ var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;chip(34,H-52,'left','WEATHER'+(age>20?' ('+age+' MIN OLD)':''),(wx.t==null?'--':wx.t)+'°C \u00b7 RAIN '+(wx.p==null?'--':wx.p)+'%',13);
  // bottom-right: device battery (Battery API where the browser has it)
  batTile(W-34,H-52);
  // top: live place name + next sun event countdown, then local date; bottom: coordinates
@@ -155,7 +155,7 @@ function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos
  g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';
  g.fillText((place.name||'SANTANDREI')+cd,CX,16);
  g.font='700 8px '+MONO;g.fillStyle=AMB;g.fillText(['SUN','MON','TUE','WED','THU','FRI','SAT'][now.getDay()]+' '+String(now.getDate()).padStart(2,'0')+' '+['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][now.getMonth()]+' '+now.getFullYear(),CX,29);
- g.font='800 10px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('GPS')===0?'':' FALLBACK'),CX,H-22);g.restore();}
+ g.font='800 9px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('GPS')===0?'':' FALLBACK'),CX,H-11);g.restore();}
 if(navigator.geolocation)navigator.geolocation.watchPosition(function(r){var mv=Math.hypot(r.coords.latitude-pos.lat,r.coords.longitude-pos.lon)>.05;pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS \u00b1'+Math.round(r.coords.accuracy)+' m'};if(mv)wx.at=0;},function(){},{enableHighAccuracy:false,maximumAge:6e4,timeout:2e4});
 function setZoom(z){zoom=Math.min(ZF,Math.max(1,z));localStorage.setItem('enochZoom',zoom);draw();}
 var anim=null;function animTo(t){var z0=zoom,t0=performance.now();cancelAnimationFrame(anim);
