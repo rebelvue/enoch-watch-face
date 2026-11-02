@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 import CoreLocation
 import WatchKit
@@ -148,17 +149,9 @@ struct FaceView: View {
         g.fill(dm, with: .color(amb.opacity(0.18))); g.stroke(dm, with: .color(amb), lineWidth: 1.3); dot(me, 1.8, .white)
         // position marker: diamond only, no labels
 
-        // top: live place name + countdown to next sunrise/sunset, then local date; bottom: coordinates
-        let cc = (sin(-0.833 * d) - sin(la * d) * sin(sky.sunLat * d)) / (cos(la * d) * cos(sky.sunLat * d))
-        var cd = ""
-        if abs(cc) <= 1 {
-            let h0 = acos(cc) / d / 15, dn = ((sky.sunLon - lo) / 15).truncatingRemainder(dividingBy: 24)
-            let noon = date.addingTimeInterval((dn > 12 ? dn - 24 : (dn < -12 ? dn + 24 : dn)) * 3600)
-            if let e = (-1...1).flatMap({ k in [(noon.addingTimeInterval(Double(k) * 86400 - h0 * 3600), "SUNRISE"), (noon.addingTimeInterval(Double(k) * 86400 + h0 * 3600), "SUNSET")] }).filter({ $0.0 > date }).min(by: { $0.0 < $1.0 }) {
-                let m = Int(e.0.timeIntervalSince(date) / 60); cd = String(format: " \u{00B7} %@ IN %dH%02d", e.1, m / 60, m % 60) }
-        }
+        // top: live place name, then local date; bottom: coordinates
         let dfm = DateFormatter(); dfm.locale = Locale(identifier: "en_US_POSIX"); dfm.dateFormat = "EEE dd MMM yyyy"
-        g.draw(Text((loc.place ?? "SANTANDREI") + cd).font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: 10))
+        g.draw(Text(loc.place ?? "SANTANDREI").font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: 10))
         g.draw(Text(dfm.string(from: date).uppercased()).font(.system(size: 7, weight: .bold, design: .monospaced)).foregroundColor(amb), at: CGPoint(x: c.x, y: 20))
         g.draw(Text(String(format: "%.3f%@ / %07.3f%@%@", abs(la), la >= 0 ? "N" : "S", abs(lo), lo >= 0 ? "E" : "W", loc.live ? "" : " FALLBACK")).font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: size.height - 12))
 
@@ -278,34 +271,52 @@ struct FaceView: View {
 
 /// Stacked HH over MM, as large as fits between the corners, in a translucent "Liquid Glass" style:
 /// the map shows through the glyphs. watchOS 26+: real .glassEffect masked by the digits; earlier: .ultraThinMaterial.
+/// Outline of the stacked HH/MM glyphs as a SwiftUI Shape (CoreText glyph paths), so the documented
+/// `glassEffect(_:in:)` modifier can render Liquid Glass in the exact shape of the digits.
+struct DigitsShape: Shape {
+    let hh: String, mm: String, fs: CGFloat
+    func path(in rect: CGRect) -> Path {
+        let font = CTFontCreateUIFontForLanguage(.system, fs, nil)!
+        let heavy = CTFontCreateCopyWithSymbolicTraits(font, fs, nil, [.traitBold, .traitMonoSpace], [.traitBold, .traitMonoSpace]) ?? font
+        func line(_ s: String) -> (CGMutablePath, CGRect) {
+            let attr = NSAttributedString(string: s, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): heavy])
+            let ln = CTLineCreateWithAttributedString(attr), out = CGMutablePath()
+            for run in CTLineGetGlyphRuns(ln) as! [CTRun] {
+                let n = CTRunGetGlyphCount(run); var gl = [CGGlyph](repeating: 0, count: n), pos = [CGPoint](repeating: .zero, count: n)
+                CTRunGetGlyphs(run, CFRange(location: 0, length: n), &gl); CTRunGetPositions(run, CFRange(location: 0, length: n), &pos)
+                for k in 0..<n { if let gp = CTFontCreatePathForGlyph(heavy, gl[k], nil) { out.addPath(gp, transform: CGAffineTransform(translationX: pos[k].x, y: pos[k].y)) } }
+            }
+            return (out, out.boundingBoxOfPath)
+        }
+        let gap = fs * 0.06, (a, ba) = line(hh), (b, bb) = line(mm), total = ba.height + gap + bb.height
+        var p = Path()
+        // CoreText is y-up: flip each row and centre it in rect
+        let ta = CGAffineTransform(translationX: rect.midX - ba.midX, y: rect.midY - total / 2 + ba.maxY).scaledBy(x: 1, y: -1)
+        let tb = CGAffineTransform(translationX: rect.midX - bb.midX, y: rect.midY - total / 2 + ba.height + gap + bb.maxY).scaledBy(x: 1, y: -1)
+        p.addPath(Path(a), transform: ta); p.addPath(Path(b), transform: tb)
+        return p
+    }
+}
+
+/// Time as Liquid Glass per Apple's docs: `glassEffect(.clear, in: shape)`; the system draws the blur,
+/// lensing, adaptive tint and light-following rim itself. No extra shadows, strokes or fills.
 struct GlassTime: View {
     let date: Date
     var body: some View {
         GeometryReader { geo in
             let cal = Calendar.current
             let hh = String(format: "%02d", cal.component(.hour, from: date)), mm = String(format: "%02d", cal.component(.minute, from: date))
-            // monospaced digit is ~0.6 em wide; leave room for the corner tiles at the sides and top/bottom lines
             let fs = min(geo.size.width * 0.78 / 1.2, geo.size.height * 0.36)
-            let digits = VStack(spacing: -fs * 0.18) { Text(hh); Text(mm) }
-                .font(.system(size: fs, weight: .heavy, design: .monospaced)).monospacedDigit()
-            ZStack {
-                glass.mask(digits)                                                     // translucent body
-                digits.foregroundStyle(.white.opacity(0.18))                           // keeps it legible on bright day zones
-                // specular edge highlight: digits minus a shifted copy leaves a thin top-left rim
-                digits.foregroundStyle(.clear)
-                    .overlay(digits.foregroundStyle(LinearGradient(colors: [.white.opacity(0.9), .white.opacity(0.1)], startPoint: .top, endPoint: .bottom))
-                        .mask(digits.foregroundStyle(.white).overlay(digits.foregroundStyle(.black).offset(x: 1.2, y: 1.6).blendMode(.destinationOut)).compositingGroup()))
+            let shape = DigitsShape(hh: hh, mm: mm, fs: fs)
+            Group {
+                if #available(watchOS 26.0, *) {
+                    Color.clear.glassEffect(.clear, in: shape)
+                } else {
+                    shape.fill(.ultraThinMaterial)
+                }
             }
-            .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .allowsHitTesting(false)
-    }
-    @ViewBuilder private var glass: some View {
-        if #available(watchOS 26.0, *) {
-            Rectangle().fill(.clear).glassEffect(.clear, in: Rectangle())
-        } else {
-            Rectangle().fill(.ultraThinMaterial)
-        }
     }
 }

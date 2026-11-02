@@ -75,29 +75,27 @@ var TOFF=(function(){var m=/[?&]t=([^&]+)/.exec(location.search),v=m&&Date.parse
 var gl1=document.createElement('canvas'),gl2=document.createElement('canvas');
 var gl3=document.createElement('canvas');
 function glassTime(hh,mm){var FS=170,OY=82,w=cv.width,h=cv.height;
+ // Liquid Glass, flat as in Apple's HIG (clear variant): the digits are a lens over the map. Inside them the map is
+ // very lightly blurred and magnified (refraction), with a faint luminosity lift (adaptive tint); the only edge
+ // treatment is a thin specular rim, brightest where it faces the light (top-left) and fading away from it.
+ // No bevel, inner shadow, drop shadow or grey fill.
  [gl1,gl2,gl3].forEach(function(c){if(c.width!==w||c.height!==h){c.width=w;c.height=h;}});
  var a=gl1.getContext('2d'),b=gl2.getContext('2d'),m=gl3.getContext('2d');
- m.setTransform(dpr,0,0,dpr,0,0);m.clearRect(0,0,W,H);m.fillStyle='#000';
  function txt(x,dx,dy){x.textAlign='center';x.textBaseline='middle';x.font='800 '+FS+'px '+MONO;x.fillText(hh,CX+dx,CY-OY+dy);x.fillText(mm,CX+dx,CY+OY+dy);}
- txt(m,0,0);function mask(x){x.save();x.setTransform(1,0,0,1,0,0);x.globalCompositeOperation='destination-in';x.drawImage(gl3,0,0);x.restore();}
- // 1) refraction: blurred, brightened, 7% magnified copy of what is under the digits
- a.setTransform(1,0,0,1,0,0);a.globalCompositeOperation='source-over';a.clearRect(0,0,w,h);a.filter='blur('+(7*dpr)+'px) brightness(1.55) saturate(1.3)';
- a.translate(CX*dpr,CY*dpr);a.scale(1.07,1.07);a.translate(-CX*dpr,-CY*dpr);a.drawImage(cv,0,0);a.filter='none';
- a.setTransform(dpr,0,0,dpr,0,0);a.fillStyle='rgba(255,255,255,.32)';a.fillRect(0,0,W,H); // frosted milkiness keeps it legible
- mask(a);
- // 2) inner shadow: glyph minus a copy shifted up-left leaves a dark lower-right rim inside the glyph
- b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.fillStyle='rgba(0,0,0,.55)';txt(b,0,0);
- b.globalCompositeOperation='destination-out';b.filter='blur('+(2*dpr)+'px)';txt(b,-3,-3);b.filter='none';
- mask(b);
+ m.setTransform(dpr,0,0,dpr,0,0);m.clearRect(0,0,W,H);m.fillStyle='#000';txt(m,0,0);
+ function mask(x,src){x.save();x.setTransform(1,0,0,1,0,0);x.globalCompositeOperation='destination-in';x.drawImage(src||gl3,0,0);x.restore();}
+ // lens: what is behind, lightly blurred, slightly brighter, magnified 6% about each row's centre
+ a.setTransform(1,0,0,1,0,0);a.globalCompositeOperation='source-over';a.clearRect(0,0,w,h);a.filter='blur('+(1.5*dpr)+'px) brightness(1.18) saturate(1.15)';
+ [CY-OY,CY+OY].forEach(function(cy){a.save();a.beginPath();a.rect(0,(cy-FS*.42)*dpr,w,FS*.84*dpr);a.clip();
+  a.translate(CX*dpr,cy*dpr);a.scale(1.06,1.06);a.translate(-CX*dpr,-cy*dpr);a.drawImage(cv,0,0);a.restore();});
+ a.filter='none';a.setTransform(dpr,0,0,dpr,0,0);a.fillStyle='rgba(255,255,255,.07)';a.fillRect(0,0,W,H);mask(a);
+ // specular rim: a 1px edge band (glyph minus a 1px-eroded copy) lit by a top-left to bottom-right gradient
+ b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);
+ b.lineJoin='round';b.lineWidth=2.2;b.textAlign='center';b.textBaseline='middle';b.font='800 '+FS+'px '+MONO;
+ var gr=b.createLinearGradient(CX-FS*.7,CY-OY-FS*.5,CX+FS*.7,CY+OY+FS*.5);gr.addColorStop(0,'rgba(255,255,255,.95)');gr.addColorStop(.45,'rgba(255,255,255,.35)');gr.addColorStop(.55,'rgba(255,255,255,.18)');gr.addColorStop(1,'rgba(255,255,255,.6)');
+ b.strokeStyle=gr;b.strokeText(hh,CX,CY-OY);b.strokeText(mm,CX,CY+OY);mask(b); // keep only the inner half: a hairline on the glass edge
  a.globalCompositeOperation='source-over';a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);
- // 3) specular top-left edge highlight
- b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.fillStyle='rgba(255,255,255,.95)';txt(b,0,0);
- b.globalCompositeOperation='destination-out';txt(b,2.2,2.6);
- a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);
- // composite: soft drop shadow so the glass lifts off the map, then the glass, then a faint mint rim light
- g.save();g.shadowColor='rgba(0,0,0,.6)';g.shadowBlur=14;g.shadowOffsetY=3;g.drawImage(gl1,0,0,W,H);g.restore();
- g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 '+FS+'px '+MONO;g.lineWidth=1.2;g.strokeStyle='rgba(225,255,235,.6)';
- g.strokeText(hh,CX,CY-OY);g.strokeText(mm,CX,CY+OY);g.restore();}
+ g.drawImage(gl1,0,0,W,H);}
 function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom;
  // beyond the ice wall: not outer space, a calm warm neutral (the dome rests on the ice wall)
  g.fillStyle='#000';g.fillRect(0,0,W,H);
@@ -212,7 +210,7 @@ function corners(now,S){getWx();var se=sunEvent(now,S);
  // top: live place name + next sun event countdown, then local date; bottom: coordinates
  getPlace();var cd='';if(se[2]){var m=Math.max(0,Math.round((se[2]-now.getTime())/6e4));cd=' \u00b7 SUN'+(se[1]==='RISE'?'RISE':'SET')+' IN '+Math.floor(m/60)+'H'+String(m%60).padStart(2,'0');}
  g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';
- g.fillText((place.name||'SANTANDREI')+cd,CX,16);
+ g.fillText(place.name||'SANTANDREI',CX,16);
  g.font='700 8px '+MONO;g.fillStyle=AMB;g.fillText(['SUN','MON','TUE','WED','THU','FRI','SAT'][now.getDay()]+' '+String(now.getDate()).padStart(2,'0')+' '+['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][now.getMonth()]+' '+now.getFullYear(),CX,29);
  g.font='800 9px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('GPS')===0?'':' FALLBACK'),CX,H-11);g.restore();}
 if(navigator.geolocation)navigator.geolocation.watchPosition(function(r){var mv=Math.hypot(r.coords.latitude-pos.lat,r.coords.longitude-pos.lon)>.05;pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS \u00b1'+Math.round(r.coords.accuracy)+' m'};if(mv)wx.at=0;},function(){},{enableHighAccuracy:false,maximumAge:6e4,timeout:2e4});
