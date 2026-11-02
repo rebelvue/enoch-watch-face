@@ -79,3 +79,4 @@ Generic tactical-map look in the spirit of modern military-shooter minimaps (sty
 
 - Time digits use Chakra Petch Bold Italic (SIL Open Font License, see EnochWatch/Sources/OFL-ChakraPetch.txt), tabular fixed cells. The radar sweep and position marker were removed.
 - Layering, bottom to top: map, day/night, borders and grid; Liquid Glass time digits; stars, sun, moon and their tags; corners and top/bottom text.
+- Self-test: add ?debug=1 to draw a magenta crosshair at the computed subsolar point and a cyan ring at the sublunar point, with their lat/lon. Day/night grading uses plain canvas compositing (no ctx.filter), so it renders the same in Safari.

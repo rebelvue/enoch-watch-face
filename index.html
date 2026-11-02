@@ -18,10 +18,14 @@ var CX=W/2,CY=H/2,R0=W/2-6,R=R0,D=Math.PI/180,pos={lat:47.0682,lon:21.8548,src:'
 var nightCv=document.createElement('canvas');nightCv.width=nightCv.height=96;
 var litCv=document.createElement('canvas');litCv.width=litCv.height=512;var discDay=null,discNight=null;
 function gradeDisc(){if(discDay)return true;if(!disc.complete||!disc.naturalWidth)return false;
- function mk(f,tint,lift){var c=document.createElement('canvas');c.width=c.height=1024;var x=c.getContext('2d');x.filter=f;x.drawImage(disc,0,0,1024,1024);x.filter='none';
-  x.globalCompositeOperation='multiply';x.fillStyle=tint;x.fillRect(0,0,1024,1024);if(lift){x.globalCompositeOperation='screen';x.fillStyle=lift;x.fillRect(0,0,1024,1024);}return c;}
- discDay=mk('brightness(1.55) contrast(1.04)','#ffffff'); // sunlit: original map, exposure raised, natural colours
- discNight=mk('brightness(.1)','#ffffff'); // night: original map darkened to ~10%, near black
+ // Safari has no CanvasRenderingContext2D.filter, so grade with plain compositing (works in every browser):
+ // gain g = exposure multiplier (1 = original). Gain > 1 adds the map onto itself ('lighter'); gain < 1 lays black over it.
+ function mk(gain){var c=document.createElement('canvas');c.width=c.height=1024;var x=c.getContext('2d');x.drawImage(disc,0,0,1024,1024);
+  if(gain>1){x.globalCompositeOperation='lighter';var k=gain-1;while(k>0){x.globalAlpha=Math.min(1,k);x.drawImage(disc,0,0,1024,1024);k-=1;}}
+  else{x.globalCompositeOperation='source-atop';x.globalAlpha=1-gain;x.fillStyle='#000';x.fillRect(0,0,1024,1024);}
+  x.globalAlpha=1;x.globalCompositeOperation='source-over';return c;}
+ discDay=mk(1.55); // sunlit: original map, exposure raised, natural colours
+ discNight=mk(.1); // night: original map darkened to ~10%, near black
  return true;}
 var disc=new Image();disc.src='disc.webp';disc.onload=draw;
 function P(lat,lon){var r=(90-lat)/180*R,a=lon*D;return[CX+r*Math.sin(a),CY+r*Math.cos(a)];}
@@ -147,6 +151,8 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  var p=P(S.sun[0],S.sun[1]);sunIcon(p[0],p[1]);
  tag(p[0],p[1],'SUN');
  var m=P(S.moon[0],S.moon[1]);moonIcon(m[0],m[1],8,S.ph);tag(m[0],m[1],'MOON '+Math.round((1-Math.cos(S.ph))/2*100)+'%');
+ if(QP.get('debug')){var ss=P(S.sun[0],S.sun[1]),sm=P(S.moon[0],S.moon[1]);g.save();g.lineWidth=1.5;g.strokeStyle='#f0f';g.beginPath();g.arc(ss[0],ss[1],12,0,7);g.moveTo(ss[0]-16,ss[1]);g.lineTo(ss[0]+16,ss[1]);g.moveTo(ss[0],ss[1]-16);g.lineTo(ss[0],ss[1]+16);g.stroke();
+  g.strokeStyle='#0ff';g.beginPath();g.arc(sm[0],sm[1],10,0,7);g.stroke();g.fillStyle='#f0f';g.font='700 8px '+MONO;g.textAlign='left';g.fillText('SUBSOLAR '+S.sun[0].toFixed(1)+','+S.sun[1].toFixed(1),8,48);g.fillStyle='#0ff';g.fillText('SUBLUNAR '+S.moon[0].toFixed(1)+','+S.moon[1].toFixed(1),8,58);g.restore();}
  corners(now,S);
  g.save();g.globalAlpha=.06;g.fillStyle='#000';for(var sy=0;sy<H;sy+=3)g.fillRect(0,sy,W,1);g.globalAlpha=1;
  var gp=g.createPattern(grain,'repeat');g.translate(Math.random()*128,Math.random()*128);g.fillStyle=gp;g.fillRect(-128,-128,W+256,H+256);g.restore();
