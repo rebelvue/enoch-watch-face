@@ -1,10 +1,10 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Enoch Watch">
-<meta name="theme-color" content="#f6efe3"><title>Enoch Watch Face</title>
+<meta name="theme-color" content="#f6efe3"><link rel="manifest" href="manifest.json"><title>Enoch Watch Face</title>
 <style>html,body{margin:0;height:100%;background:#f6efe3;font-family:-apple-system,system-ui,sans-serif;color:#5a4632}
 body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-.watch{background:#111;border-radius:96px;padding:18px;box-shadow:0 10px 30px rgba(90,70,50,.35)}
+.watch{background:#3a3530;border-radius:96px;padding:18px;box-shadow:0 10px 30px rgba(90,70,50,.35)}
 canvas{display:block;border-radius:78px;width:min(82vw,396px);aspect-ratio:396/484;height:auto}
 p{margin:0;font-size:13px;opacity:.75;text-align:center;max-width:90vw}</style></head><body>
 <div class="watch"><canvas id="c" width="396" height="484"></canvas></div>
@@ -26,18 +26,19 @@ function sky(ms){var n=ms/864e5-10957.5,e=(23.439-4e-7*n)*D,gst=((280.46061837+3
  var Mm=(134.963+13.064993*n)*D,F=(93.272+13.22935*n)*D,Dm=(297.85+12.190749*n)*D;
  var lm=(218.316+13.176396*n+6.289*Math.sin(Mm)+1.274*Math.sin(2*Dm-Mm)+.658*Math.sin(2*Dm))*D,bm=5.128*Math.sin(F)*D;
  var s=eq(ls,0),m=eq(lm,bm);return{sun:s,moon:m,gst:gst,ph:((lm-ls)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)};}
+// stars sit on the inner surface of the firmament dome (as in world-of-enoch-3d-map): seen from above,
+// a star at height u projects to radius sqrt(1-u^2) of the dome rim, so all stars fall inside the disc
 var stars=[];(function(){var s=7;function r(){s=(s*16807)%2147483647;return s/2147483647;}
- for(var i=0;i<260;i++)stars.push([r()*360,Math.sqrt(r())*Math.hypot(W,H)/2,r()*1.3+.3,r()]);})();
+ for(var i=0;i<320;i++){var u=.04+r()*.96,mg=Math.pow(r(),3.2);stars.push([r()*360,Math.sqrt(1-u*u),.5+mg*1.4,.3+mg*.7]);}})();
+function nightAt(r,lo,sl,so){var la=(90-Math.min(r,1)*180)*D,c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);return Math.min(1,Math.max(0,(.08-c)*4));}
 function moonIcon(x,y,rad,ph){g.save();g.beginPath();g.arc(x,y,rad,0,7);g.clip();
  g.fillStyle='#f4efe0';g.fillRect(x-rad,y-rad,2*rad,2*rad);
  var f=(1-Math.cos(ph))/2,off=(ph<Math.PI?-1:1)*2*rad*f;g.fillStyle='#2b3050';g.beginPath();g.arc(x+off,y,rad*1.02,0,7);g.fill();
  g.restore();g.strokeStyle='rgba(255,255,255,.7)';g.lineWidth=1;g.beginPath();g.arc(x,y,rad,0,7);g.stroke();}
 function draw(){var now=new Date(),S=sky(now.getTime());
- g.fillStyle='#0b1030';g.fillRect(0,0,W,H);
- // stars turn with sidereal time around the pole
- g.save();g.translate(CX,CY);g.rotate(-S.gst*D);
- stars.forEach(function(t){g.globalAlpha=.4+.6*t[3];g.fillStyle=t[3]>.85?'#ffe7b8':'#fff';g.beginPath();var a=t[0]*D;g.arc(t[1]*Math.sin(a),t[1]*Math.cos(a),t[2],0,7);g.fill();});
- g.restore();g.globalAlpha=1;
+ // beyond the ice wall: not outer space, a calm warm neutral (the dome rests on the ice wall)
+ var bg=g.createRadialGradient(CX,CY,R,CX,CY,Math.hypot(W,H)/2);bg.addColorStop(0,'#e9dfcd');bg.addColorStop(1,'#cfc2ab');
+ g.fillStyle=bg;g.fillRect(0,0,W,H);
  // map
  g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();
  if(disc.complete&&disc.naturalWidth){g.filter='brightness(1.35) saturate(1.25)';g.drawImage(disc,CX-R,CY-R,2*R,2*R);g.filter='none';}
@@ -47,8 +48,17 @@ function draw(){var now=new Date(),S=sky(now.getTime());
   var la=(90-Math.min(r,1)*180)*D,lo=Math.atan2(dx,dy),c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);
   img.data[k]=8;img.data[k+1]=12;img.data[k+2]=45;img.data[k+3]=Math.round(255*Math.min(.62,Math.max(0,(.08-c)*2.5)));}
  sh.putImageData(img,0,0);g.imageSmoothingEnabled=true;g.drawImage(nightCv,CX-R,CY-R,2*R,2*R);
+ // stars inside the firmament, turning around the pole with sidereal time; faint by day, bright at night
+ var rot=S.gst*D;
+ stars.forEach(function(t){var a=t[0]*D-rot,rr=t[1]*1.03,dx=rr*Math.sin(a),dy=rr*Math.cos(a),r=Math.hypot(dx,dy);if(r>1)return;
+  var n=nightAt(r,Math.atan2(dx,dy),sl,so);g.globalAlpha=t[3]*(.12+.88*n);g.fillStyle='#fff8e6';
+  g.beginPath();g.arc(CX+dx*R,CY+dy*R,t[2],0,7);g.fill();});
+ g.globalAlpha=1;
+ // the firmament dome from above: clear at the crown, pale blue sheen toward the rim
+ var dm=g.createRadialGradient(CX,CY,0,CX,CY,R*1.03);dm.addColorStop(0,'rgba(140,190,255,.05)');dm.addColorStop(.75,'rgba(160,200,255,.12)');dm.addColorStop(1,'rgba(205,228,255,.5)');
+ g.fillStyle=dm;g.fillRect(CX-R,CY-R,2*R,2*R);
  g.restore();
- g.strokeStyle='rgba(255,240,210,.5)';g.lineWidth=1.5;g.beginPath();g.arc(CX,CY,R,0,7);g.stroke();
+ g.strokeStyle='rgba(190,220,255,.9)';g.lineWidth=2;g.beginPath();g.arc(CX,CY,R,0,7);g.stroke();g.strokeStyle='rgba(120,150,190,.35)';g.lineWidth=4;g.beginPath();g.arc(CX,CY,R+3,0,7);g.stroke();
  // stacked time
  var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');
  g.textAlign='center';g.textBaseline='middle';g.font='800 64px -apple-system,system-ui,sans-serif';
@@ -62,9 +72,32 @@ function draw(){var now=new Date(),S=sky(now.getTime());
  // me
  var q=P(pos.lat,pos.lon);g.fillStyle='rgba(255,80,90,.3)';g.beginPath();g.arc(q[0],q[1],10,0,7);g.fill();
  g.fillStyle='#ff4d5e';g.strokeStyle='#fff';g.lineWidth=2;g.beginPath();g.arc(q[0],q[1],5,0,7);g.fill();g.stroke();
- g.font='600 13px -apple-system,system-ui';g.fillStyle='rgba(255,240,215,.85)';
- g.fillText(now.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'}),CX,26);
+ corners(now,S);
  document.getElementById('info').textContent='Position: '+pos.lat.toFixed(3)+', '+pos.lon.toFixed(3)+' ('+pos.src+')';}
+// ---- four corner complications ----
+var HOME={lat:47.0682,lon:21.8548},wx={t:null,at:0};
+function fmt(d,tz){return d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:tz});}
+function sunEvent(now,S){ // next sunrise/sunset at pos, from subsolar point (local calc)
+ var la=pos.lat*D,de=S.sun[0]*D,c=(Math.sin(-.833*D)-Math.sin(la)*Math.sin(de))/(Math.cos(la)*Math.cos(de));
+ if(c>1)return['POLAR','night'];if(c<-1)return['MIDN.','sun'];
+ var h0=Math.acos(c)/D/15,dn=((S.sun[1]-pos.lon)/15%24+36)%24-12,noon=now.getTime()+dn*36e5,ev=[];
+ for(var k=-1;k<=1;k++){ev.push([noon+k*864e5-h0*36e5,'RISE']);ev.push([noon+k*864e5+h0*36e5,'SET']);}
+ ev=ev.filter(function(e){return e[0]>now.getTime();}).sort(function(a,b){return a[0]-b[0];});
+ return[fmt(new Date(ev[0][0])),ev[0][1]];}
+function moonName(p){var f=p/(2*Math.PI);return f<.03||f>.97?'NEW':f<.22?'WAX CRES':f<.28?'1ST QTR':f<.47?'WAX GIBB':f<.53?'FULL':f<.72?'WAN GIBB':f<.78?'3RD QTR':'WAN CRES';}
+function getWx(){if(Date.now()-wx.at<18e5)return;wx.at=Date.now();
+ fetch('https://api.open-meteo.com/v1/forecast?latitude='+pos.lat.toFixed(3)+'&longitude='+pos.lon.toFixed(3)+'&current=temperature_2m').then(function(r){return r.json();}).then(function(j){wx.t=Math.round(j.current.temperature_2m);}).catch(function(){});}
+var batt=null;if(navigator.getBattery)navigator.getBattery().then(function(b){batt=b;}).catch(function(){});
+function chip(x,y,al,top,big,col){g.save();g.textAlign=al;g.font='700 10px -apple-system,system-ui,sans-serif';g.fillStyle='#8a6d4b';g.fillText(top,x,y);
+ g.font='800 17px -apple-system,system-ui,sans-serif';g.fillStyle=col||'#3d2e20';g.fillText(big,x,y+18);g.restore();}
+function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos(S.ph))/2*100);
+ g.textBaseline='middle';
+ chip(34,30,'left','SUN'+(se[1]==='RISE'?'RISE':se[1]==='SET'?'SET':''),se[0],'#c7781a');
+ chip(W-34,30,'right',moonName(S.ph),il+'%','#4a5680');
+ chip(34,H-50,'left',now.toLocaleDateString('en-GB',{weekday:'short',day:'numeric'}).toUpperCase(),wx.t==null?'--°':wx.t+'°');
+ var away=Math.hypot(pos.lat-HOME.lat,pos.lon-HOME.lon)>1;
+ if(batt&&!away)chip(W-34,H-50,'right','BATTERY',Math.round(batt.level*100)+'%');
+ else chip(W-34,H-50,'right','HOME',fmt(now,'Europe/Bucharest'),'#3d2e20');}
 if(navigator.geolocation)navigator.geolocation.getCurrentPosition(function(r){pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS'};draw();},function(){},{timeout:8000});
 draw();setInterval(draw,1000);
 </script></body></html>

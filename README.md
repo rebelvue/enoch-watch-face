@@ -33,5 +33,12 @@ watchOS doesn't let third parties make their own watch faces. This runs as a wat
 These are the same low-precision formulas the main map uses, accurate to about 0.5 degree.
 - **Sun:** mean anomaly and ecliptic longitude, converted to declination and right ascension. Its map longitude is RA minus Greenwich sidereal time.
 - **Moon:** ecliptic longitude with the three main periodic terms, plus latitude, converted the same way. The phase is the moon's ecliptic longitude minus the sun's.
-- **Stars:** a decorative starfield turned by Greenwich sidereal time. These aren't real catalogue stars.
+- **Stars:** set inside the firmament, on the dome's inner surface, as in world-of-enoch-3d-map. Seen from above they all fall over the disc and turn around the pole with Greenwich sidereal time. They are faint over the day side and bright over the night side. They're decorative, not real catalogue stars.
+- **Firmament:** a translucent dome over the disc, with its rim on the ice wall. Outside the ice wall is a calm warm neutral background, not outer space.
+
+## Corner complications
+- **Top-left:** the next sunrise or sunset at your position, computed locally from the subsolar point.
+- **Top-right:** the moon phase name and the percent illuminated.
+- **Bottom-left:** weekday and day, plus the current temperature from Open-Meteo (free, no key, refreshed every 30 minutes).
+- **Bottom-right:** HOME (Santandrei, Europe/Bucharest) time when you're more than about 1 degree away from home. At home it shows battery level instead: WKInterfaceDevice on the Watch, or the Battery API in browsers that have it (Safari doesn't).
 - **Map projection:** r = (90 - lat) / 180 * R. Longitude 0 points down and east runs to the right.
