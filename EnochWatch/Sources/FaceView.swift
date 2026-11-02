@@ -213,7 +213,7 @@ struct FaceView: View {
         g.stroke(pulse, with: .color(hrCol == .white ? Color(red: 0.75, green: 0.96, blue: 0.82) : hrCol), lineWidth: 1.2)
         // bottom-left: weekday + day, and temperature (Open-Meteo, free, no key)
         let df = DateFormatter(); df.dateFormat = "EEE d"
-        corner(&g, CGPoint(x: 30, y: size.height - 46), .leading, "WEATHER" + (wxOk.map { date.timeIntervalSince($0) > 1200 ? " (\(Int(date.timeIntervalSince($0) / 60)) MIN OLD)" : "" } ?? ""), (temp.map { "\($0)°C" } ?? "--°C") + " \u{00B7} RAIN " + (rain.map { "\($0)%" } ?? "--%"), Color(red: 0.24, green: 0.18, blue: 0.13), 12)
+        corner(&g, CGPoint(x: 30, y: size.height - 46), .leading, "RAIN" + (wxOk.map { date.timeIntervalSince($0) > 1200 ? " (\(Int(date.timeIntervalSince($0) / 60)) MIN OLD)" : "" } ?? ""), rain.map { "\($0)%" } ?? "--", Color(red: 0.24, green: 0.18, blue: 0.13))
         if date.timeIntervalSince(wxAt) > 720 { DispatchQueue.main.async { fetchTemp(me) } }
         // bottom-right: battery here; HOME (Santandrei) time instead when you are away from home
         // bottom-right: watch battery, always (level bar, bolt while charging)

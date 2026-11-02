@@ -148,7 +148,7 @@ function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos
  chip(34,46,'left',se[1]==='RISE'?'SUNRISE':se[1]==='SET'?'SUNSET':'SUN',se[0]);
  // top-right: heart rate. Browsers cannot read heart rate, so no value is shown (watch reads HealthKit)
  var hx=chip(W-34,46,'right','HEART RATE','--');g.save();g.strokeStyle=ACC;g.lineWidth=1.3;g.beginPath();g.moveTo(hx-26,63);g.lineTo(hx-20,63);g.lineTo(hx-17,56);g.lineTo(hx-13,70);g.lineTo(hx-10,63);g.lineTo(hx-5,63);g.stroke();g.restore();
- var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;chip(34,H-52,'left','WEATHER'+(age>20?' ('+age+' MIN OLD)':''),(wx.t==null?'--':wx.t)+'°C \u00b7 RAIN '+(wx.p==null?'--':wx.p)+'%',13);
+ var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;chip(34,H-52,'left','RAIN'+(age>20?' ('+age+' MIN OLD)':''),wx.p==null?'--':wx.p+'%');
  // bottom-right: device battery (Battery API where the browser has it)
  batTile(W-34,H-52);
  // top: live place name + next sun event countdown, then local date; bottom: coordinates
