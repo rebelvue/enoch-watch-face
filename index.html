@@ -112,9 +112,7 @@ function draw(){var now=new Date(),S=sky(now.getTime());R=R0*zoom;
  // position: reticle + readout
  var q=P(pos.lat,pos.lon),x=q[0],y=q[1];g.lineWidth=1.4;diamond(x,y,8,AMB,'rgba(255,177,59,.18)');diamond(x,y,2.5,'#fff','#fff');
  g.strokeStyle='rgba(255,177,59,.7)';g.lineWidth=1;[[1,0],[-1,0],[0,1],[0,-1]].forEach(function(v){g.beginPath();g.moveTo(x+v[0]*11,y+v[1]*11);g.lineTo(x+v[0]*16,y+v[1]*16);g.stroke();});
- var hb=gc(pos.lat,pos.lon,HOME.lat,HOME.lon);
- tag(x,y,'LOC '+Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W'),true);
- tag(x,y+14,(hb[0]<1?'AT HOME':'HOME '+Math.round(hb[0])+'KM BRG '+String(Math.round(hb[1])%360).padStart(3,'0')),true);
+ // position marker: diamond only, no labels
  corners(now,S);
  g.save();g.globalAlpha=.06;g.fillStyle='#000';for(var sy=0;sy<H;sy+=3)g.fillRect(0,sy,W,1);g.globalAlpha=1;
  var gp=g.createPattern(grain,'repeat');g.translate(Math.random()*128,Math.random()*128);g.fillStyle=gp;g.fillRect(-128,-128,W+256,H+256);g.restore();
@@ -122,13 +120,18 @@ function draw(){var now=new Date(),S=sky(now.getTime());R=R0*zoom;
 // ---- four corner complications ----
 var HOME={lat:47.0682,lon:21.8548},wx={t:null,at:0};
 function fmt(d,tz){return d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:tz});}
+var place={name:null,lat:null,lon:null,busy:false};
+function getPlace(){ // BigDataCloud reverse-geocode-client (free, no key); only refetch after moving >5 km
+ if(place.busy)return;if(place.lat!=null&&gc(pos.lat,pos.lon,place.lat,place.lon)[0]<5)return;
+ place.busy=true;var la=pos.lat,lo=pos.lon;
+ fetch('https://api.bigdatacloud.net/data/reverse-geocode-client?latitude='+la.toFixed(4)+'&longitude='+lo.toFixed(4)+'&localityLanguage=en').then(function(r){return r.json();}).then(function(j){var n=j.city||j.locality||j.principalSubdivision||j.countryName;if(n)place.name=n.toUpperCase();place.lat=la;place.lon=lo;}).catch(function(){place.lat=la;place.lon=lo;}).finally(function(){place.busy=false;});}
 function sunEvent(now,S){ // next sunrise/sunset at pos, from subsolar point (local calc)
  var la=pos.lat*D,de=S.sun[0]*D,c=(Math.sin(-.833*D)-Math.sin(la)*Math.sin(de))/(Math.cos(la)*Math.cos(de));
  if(c>1)return['POLAR','night'];if(c<-1)return['MIDN.','sun'];
  var h0=Math.acos(c)/D/15,dn=((S.sun[1]-pos.lon)/15%24+36)%24-12,noon=now.getTime()+dn*36e5,ev=[];
  for(var k=-1;k<=1;k++){ev.push([noon+k*864e5-h0*36e5,'RISE']);ev.push([noon+k*864e5+h0*36e5,'SET']);}
  ev=ev.filter(function(e){return e[0]>now.getTime();}).sort(function(a,b){return a[0]-b[0];});
- return[fmt(new Date(ev[0][0])),ev[0][1]];}
+ return[fmt(new Date(ev[0][0])),ev[0][1],ev[0][0]];}
 function moonName(p){var f=p/(2*Math.PI);return f<.03||f>.97?'NEW':f<.22?'WAX CRES':f<.28?'1ST QTR':f<.47?'WAX GIBB':f<.53?'FULL':f<.72?'WAN GIBB':f<.78?'3RD QTR':'WAN CRES';}
 function getWx(){if(Date.now()-wx.at<72e4)return;wx.at=Date.now();
  fetch('https://api.open-meteo.com/v1/forecast?latitude='+pos.lat.toFixed(3)+'&longitude='+pos.lon.toFixed(3)+'&current=temperature_2m&hourly=precipitation_probability&forecast_hours=1').then(function(r){return r.json();}).then(function(j){wx.t=Math.round(j.current.temperature_2m);wx.ok=Date.now();wx.p=(j.hourly&&j.hourly.precipitation_probability)?j.hourly.precipitation_probability[0]:null;}).catch(function(){});}
@@ -147,11 +150,12 @@ function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos
  var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;chip(34,H-52,'left','WX // PRECIP'+(age>20?' '+age+'M':''),(wx.t==null?'--':wx.t)+'°C '+(wx.p==null?'--':wx.p)+'%');
  // bottom-right: device battery (Battery API where the browser has it)
  batTile(W-34,H-52);
- // status line + zulu
- g.save();g.textAlign='center';g.textBaseline='middle';g.font='700 8px '+MONO;g.fillStyle=AMB;
- g.fillText('TS//SCI  EYES ONLY',CX,22);
- var z=String(now.getUTCHours()).padStart(2,'0')+String(now.getUTCMinutes()).padStart(2,'0')+'Z';
- g.font='800 11px '+MONO;g.fillStyle='#fff';g.fillText('ZULU '+z,CX,H-22);g.restore();}
+ // top: live place name + next sun event countdown, then local date; bottom: coordinates
+ getPlace();var cd='';if(se[2]){var m=Math.max(0,Math.round((se[2]-now.getTime())/6e4));cd=' \u00b7 SUN'+(se[1]==='RISE'?'RISE':'SET')+' IN '+Math.floor(m/60)+'H'+String(m%60).padStart(2,'0');}
+ g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';
+ g.fillText((place.name||'SANTANDREI')+cd,CX,16);
+ g.font='700 8px '+MONO;g.fillStyle=AMB;g.fillText(['SUN','MON','TUE','WED','THU','FRI','SAT'][now.getDay()]+' '+String(now.getDate()).padStart(2,'0')+' '+['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][now.getMonth()]+' '+now.getFullYear(),CX,29);
+ g.font='800 10px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('GPS')===0?'':' FALLBACK'),CX,H-22);g.restore();}
 if(navigator.geolocation)navigator.geolocation.watchPosition(function(r){var mv=Math.hypot(r.coords.latitude-pos.lat,r.coords.longitude-pos.lon)>.05;pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS \u00b1'+Math.round(r.coords.accuracy)+' m'};if(mv)wx.at=0;},function(){},{enableHighAccuracy:false,maximumAge:6e4,timeout:2e4});
 function setZoom(z){zoom=Math.min(ZF,Math.max(1,z));localStorage.setItem('enochZoom',zoom);draw();}
 var anim=null;function animTo(t){var z0=zoom,t0=performance.now();cancelAnimationFrame(anim);

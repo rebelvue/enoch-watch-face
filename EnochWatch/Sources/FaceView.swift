@@ -5,10 +5,17 @@ import WatchKit
 final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var coord = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548) // fallback: Santandrei, Bihor, Romania (home)
     @Published var live = false
+    @Published var place: String? = nil
+    private var placeAt: CLLocation? = nil
+    private let geo = CLGeocoder()
     private let m = CLLocationManager()
     override init() { super.init(); m.delegate = self; m.desiredAccuracy = kCLLocationAccuracyKilometer
         m.distanceFilter = 500; m.requestWhenInUseAuthorization(); m.startUpdatingLocation() }
-    func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) { if let c = l.last?.coordinate { coord = c; live = true } }
+    func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) { if let L = l.last { coord = L.coordinate; live = true
+            // reverse-geocode (CLGeocoder) only after moving more than 5 km
+            if placeAt.map({ L.distance(from: $0) > 5000 }) ?? true, !geo.isGeocoding {
+                placeAt = L; geo.reverseGeocodeLocation(L) { [weak self] pm, _ in
+                    if let n = pm?.first.flatMap({ $0.locality ?? $0.administrativeArea ?? $0.country }) { DispatchQueue.main.async { self?.place = n.uppercased() } } } } } }
     func locationManager(_ m: CLLocationManager, didFailWithError e: Error) {}
 }
 
@@ -139,16 +146,21 @@ struct FaceView: View {
         let me = P(loc.coord.latitude, loc.coord.longitude), la = loc.coord.latitude, lo = loc.coord.longitude
         var dm = Path(); dm.move(to: CGPoint(x: me.x, y: me.y - 7)); dm.addLine(to: CGPoint(x: me.x + 7, y: me.y)); dm.addLine(to: CGPoint(x: me.x, y: me.y + 7)); dm.addLine(to: CGPoint(x: me.x - 7, y: me.y)); dm.closeSubpath()
         g.fill(dm, with: .color(amb.opacity(0.18))); g.stroke(dm, with: .color(amb), lineWidth: 1.3); dot(me, 1.8, .white)
-        let p1 = la * d, p2 = home.latitude * d, dl = (home.longitude - lo) * d
-        let km = 2 * asin(sqrt(pow(sin((p2 - p1) / 2), 2) + cos(p1) * cos(p2) * pow(sin(dl / 2), 2))) * 6371
-        let brg = (atan2(sin(dl) * cos(p2), cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl)) / d + 360).truncatingRemainder(dividingBy: 360)
-        tag(me, String(format: "LOC %.3f%@ %07.3f%@%@", abs(la), la >= 0 ? "N" : "S", abs(lo), lo >= 0 ? "E" : "W", loc.live ? "" : " FALLBACK"), acc)
-        tag(CGPoint(x: me.x, y: me.y + 11), km < 1 ? "AT HOME" : String(format: "HOME %.0fKM BRG %03.0f", km, brg), acc)
+        // position marker: diamond only, no labels
 
-        // status line + zulu
-        var z = Calendar(identifier: .gregorian); z.timeZone = TimeZone(identifier: "UTC")!
-        g.draw(Text("TS//SCI  EYES ONLY").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundColor(amb), at: CGPoint(x: c.x, y: 14))
-        g.draw(Text(String(format: "ZULU %02d%02dZ", z.component(.hour, from: date), z.component(.minute, from: date))).font(.system(size: 10, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: size.height - 12))
+        // top: live place name + countdown to next sunrise/sunset, then local date; bottom: coordinates
+        let cc = (sin(-0.833 * d) - sin(la * d) * sin(sky.sunLat * d)) / (cos(la * d) * cos(sky.sunLat * d))
+        var cd = ""
+        if abs(cc) <= 1 {
+            let h0 = acos(cc) / d / 15, dn = ((sky.sunLon - lo) / 15).truncatingRemainder(dividingBy: 24)
+            let noon = date.addingTimeInterval((dn > 12 ? dn - 24 : (dn < -12 ? dn + 24 : dn)) * 3600)
+            if let e = (-1...1).flatMap({ k in [(noon.addingTimeInterval(Double(k) * 86400 - h0 * 3600), "SUNRISE"), (noon.addingTimeInterval(Double(k) * 86400 + h0 * 3600), "SUNSET")] }).filter({ $0.0 > date }).min(by: { $0.0 < $1.0 }) {
+                let m = Int(e.0.timeIntervalSince(date) / 60); cd = String(format: " \u{00B7} %@ IN %dH%02d", e.1, m / 60, m % 60) }
+        }
+        let dfm = DateFormatter(); dfm.locale = Locale(identifier: "en_US_POSIX"); dfm.dateFormat = "EEE dd MMM yyyy"
+        g.draw(Text((loc.place ?? "SANTANDREI") + cd).font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: 10))
+        g.draw(Text(dfm.string(from: date).uppercased()).font(.system(size: 7, weight: .bold, design: .monospaced)).foregroundColor(amb), at: CGPoint(x: c.x, y: 20))
+        g.draw(Text(String(format: "%.3f%@ / %07.3f%@%@", abs(la), la >= 0 ? "N" : "S", abs(lo), lo >= 0 ? "E" : "W", loc.live ? "" : " FALLBACK")).font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: size.height - 12))
 
         corners(&g, size, date, sky)
         for y in stride(from: 0.0, to: size.height, by: 3) { g.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.06))) }
