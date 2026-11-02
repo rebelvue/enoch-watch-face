@@ -13,7 +13,7 @@ p{margin:0;font-size:13px;opacity:.75;text-align:center;max-width:90vw}</style><
 // Projection from World of Enoch: r = (90 - lat)/180 * R, angle = lon; lon 0 points down, east to the right.
 var cv=document.getElementById('c'),g=cv.getContext('2d'),W=396,H=484,dpr=Math.min(3,window.devicePixelRatio||1);
 cv.width=W*dpr;cv.height=H*dpr;g.scale(dpr,dpr);
-var CX=W/2,CY=H/2,R=W/2-6,D=Math.PI/180,pos={lat:52.2241,lon:20.9886,src:'default: Warsaw'};
+var CX=W/2,CY=H/2,R=W/2-6,D=Math.PI/180,pos={lat:47.0682,lon:21.8548,src:'default: Santandrei'};
 var nightCv=document.createElement('canvas');nightCv.width=nightCv.height=96;
 var disc=new Image();disc.src='disc.webp';disc.onload=draw;
 function P(lat,lon){var r=(90-lat)/180*R,a=lon*D;return[CX+r*Math.sin(a),CY+r*Math.cos(a)];}

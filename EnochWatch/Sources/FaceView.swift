@@ -2,7 +2,7 @@ import SwiftUI
 import CoreLocation
 
 final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
-    @Published var coord = CLLocationCoordinate2D(latitude: 52.2241, longitude: 20.9886) // Radisson Blu Sobieski, Warsaw
+    @Published var coord = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548) // Santandrei, Bihor, Romania (home)
     private let m = CLLocationManager()
     override init() { super.init(); m.delegate = self; m.desiredAccuracy = kCLLocationAccuracyKilometer
         m.requestWhenInUseAuthorization(); m.requestLocation() }
