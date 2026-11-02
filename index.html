@@ -86,7 +86,7 @@ function sunEvent(now,S){ // next sunrise/sunset at pos, from subsolar point (lo
  return[fmt(new Date(ev[0][0])),ev[0][1]];}
 function moonName(p){var f=p/(2*Math.PI);return f<.03||f>.97?'NEW':f<.22?'WAX CRES':f<.28?'1ST QTR':f<.47?'WAX GIBB':f<.53?'FULL':f<.72?'WAN GIBB':f<.78?'3RD QTR':'WAN CRES';}
 function getWx(){if(Date.now()-wx.at<18e5)return;wx.at=Date.now();
- fetch('https://api.open-meteo.com/v1/forecast?latitude='+pos.lat.toFixed(3)+'&longitude='+pos.lon.toFixed(3)+'&current=temperature_2m').then(function(r){return r.json();}).then(function(j){wx.t=Math.round(j.current.temperature_2m);}).catch(function(){});}
+ fetch('https://api.open-meteo.com/v1/forecast?latitude='+pos.lat.toFixed(3)+'&longitude='+pos.lon.toFixed(3)+'&current=temperature_2m&hourly=precipitation_probability&forecast_hours=1').then(function(r){return r.json();}).then(function(j){wx.t=Math.round(j.current.temperature_2m);wx.p=(j.hourly&&j.hourly.precipitation_probability)?j.hourly.precipitation_probability[0]:null;}).catch(function(){});}
 var batt=null;if(navigator.getBattery)navigator.getBattery().then(function(b){batt=b;}).catch(function(){});
 function chip(x,y,al,top,big,col){g.save();g.textAlign=al;g.font='700 10px -apple-system,system-ui,sans-serif';g.fillStyle='#8a6d4b';g.fillText(top,x,y);
  g.font='800 17px -apple-system,system-ui,sans-serif';g.fillStyle=col||'#3d2e20';g.fillText(big,x,y+18);g.restore();}
@@ -94,7 +94,7 @@ function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos
  g.textBaseline='middle';
  chip(34,30,'left','SUN'+(se[1]==='RISE'?'RISE':se[1]==='SET'?'SET':''),se[0],'#c7781a');
  chip(W-34,30,'right',moonName(S.ph),il+'%','#4a5680');
- chip(34,H-50,'left',now.toLocaleDateString('en-GB',{weekday:'short',day:'numeric'}).toUpperCase(),wx.t==null?'--°':wx.t+'°');
+ chip(34,H-50,'left',now.toLocaleDateString('en-GB',{weekday:'short',day:'numeric'}).toUpperCase(),(wx.t==null?'--°':wx.t+'°')+'  ☂'+(wx.p==null?'--':wx.p)+'%');
  var away=Math.hypot(pos.lat-HOME.lat,pos.lon-HOME.lon)>1;
  if(batt&&!away)chip(W-34,H-50,'right','BATTERY',Math.round(batt.level*100)+'%');
  else chip(W-34,H-50,'right','HOME',fmt(now,'Europe/Bucharest'),'#3d2e20');}

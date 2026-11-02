@@ -100,6 +100,7 @@ struct FaceView: View {
 
     // ---- four corner complications ----
     @State private var temp: Int? = nil
+    @State private var rain: Int? = nil
     @State private var wxAt = Date.distantPast
     private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
 
@@ -127,7 +128,7 @@ struct FaceView: View {
         corner(&g, CGPoint(x: size.width - 30, y: 26), .trailing, name, "\(Int((1 - cos(sky.phase)) / 2 * 100))%", Color(red: 0.29, green: 0.34, blue: 0.5))
         // bottom-left: weekday + day, and temperature (Open-Meteo, free, no key)
         let df = DateFormatter(); df.dateFormat = "EEE d"
-        corner(&g, CGPoint(x: 30, y: size.height - 46), .leading, df.string(from: date).uppercased(), temp.map { "\($0)°" } ?? "--°", Color(red: 0.24, green: 0.18, blue: 0.13))
+        corner(&g, CGPoint(x: 30, y: size.height - 46), .leading, df.string(from: date).uppercased(), (temp.map { "\($0)°" } ?? "--°") + "  ☂" + (rain.map { "\($0)%" } ?? "--"), Color(red: 0.24, green: 0.18, blue: 0.13))
         if date.timeIntervalSince(wxAt) > 1800 { DispatchQueue.main.async { fetchTemp(me) } }
         // bottom-right: battery here; HOME (Santandrei) time instead when you are away from home
         let away = hypot(me.latitude - home.latitude, me.longitude - home.longitude) > 1
@@ -143,10 +144,10 @@ struct FaceView: View {
 
     private func fetchTemp(_ c: CLLocationCoordinate2D) {
         wxAt = Date()
-        let u = URL(string: String(format: "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f&current=temperature_2m", c.latitude, c.longitude))!
+        let u = URL(string: String(format: "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f&current=temperature_2m&hourly=precipitation_probability&forecast_hours=1", c.latitude, c.longitude))!
         URLSession.shared.dataTask(with: u) { data, _, _ in
-            struct R: Decodable { struct C: Decodable { let temperature_2m: Double }; let current: C }
-            if let data, let r = try? JSONDecoder().decode(R.self, from: data) { DispatchQueue.main.async { temp = Int(r.current.temperature_2m.rounded()) } }
+            struct R: Decodable { struct C: Decodable { let temperature_2m: Double }; struct H: Decodable { let precipitation_probability: [Int?] }; let current: C; let hourly: H? }
+            if let data, let r = try? JSONDecoder().decode(R.self, from: data) { DispatchQueue.main.async { temp = Int(r.current.temperature_2m.rounded()); rain = r.hourly?.precipitation_probability.first ?? nil } }
         }.resume()
     }
 }
