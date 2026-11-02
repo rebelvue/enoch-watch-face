@@ -77,30 +77,51 @@ var grain=document.createElement('canvas');grain.width=grain.height=128;(functio
 // ?t=2026-11-02T12:00Z previews another moment (testing); default is the live device clock
 var TOFF=(function(){var m=/[?&]t=([^&]+)/.exec(location.search),v=m&&Date.parse(decodeURIComponent(m[1]));return v?v-Date.now():0;})();
 var gl1=document.createElement('canvas'),gl2=document.createElement('canvas');
-var gl3=document.createElement('canvas'),glSm=document.createElement('canvas');
+var gl3=document.createElement('canvas'),glSm=document.createElement('canvas'),glS=document.createElement('canvas');
 function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
- // Liquid Glass (regular variant) tuned for legibility: frosted white glass over a blurred backdrop, a crisp
- // bright rim and a very soft dark halo for contrast (vibrancy, not a drop shadow). No ctx.filter: blur is done by
- // downscaling and upscaling with smoothing, so it looks the same in Safari.
+ // Apple Liquid Glass, clear variant: no frost. The glyphs are thick glass lenses. Inside each glyph the map is
+ // magnified ~1.2x and bent toward the edges (displacement along the gradient of a blurred copy of the glyph alpha,
+ // i.e. a soft distance-to-edge field), with a slight chromatic fringe, a thin bright specular rim on edges facing the
+ // top-left light and a fainter one bottom-right. Pixel work runs on a half-res offscreen (no ctx.filter, Safari-safe),
+ // cached: the edge field once per minute, the refracted backdrop every ~10 s.
  [gl1,gl2,gl3].forEach(function(c){if(c.width!==w||c.height!==h){c.width=w;c.height=h;}});
  var a=gl1.getContext('2d'),b=gl2.getContext('2d'),m=gl3.getContext('2d');
  // slanted sporty digits (Chakra Petch Bold Italic, OFL) on fixed tabular cells so the width never jumps
  var TF='italic 700 '+FS+'px CPB,'+MONO,ADV=FS*.62;
  function each(x,dx,dy,fn){x.textAlign='center';x.textBaseline='middle';x.font=TF;[[hh,CY-OY],[mm,CY+OY]].forEach(function(r){for(var i=0;i<2;i++)fn.call(x,r[0][i],CX+(i-.5)*ADV+dx,r[1]+dy);});}
- function txt(x,dx,dy){each(x,dx,dy,x.fillText);}
- m.setTransform(dpr,0,0,dpr,0,0);m.clearRect(0,0,W,H);m.fillStyle='#000';txt(m,0,0);
  function mask(x,src){x.save();x.setTransform(1,0,0,1,0,0);x.globalCompositeOperation='destination-in';x.drawImage(src||gl3,0,0);x.restore();}
- function soft(src,k){var s=glSm;s.width=Math.ceil(w/k);s.height=Math.ceil(h/k);var sx=s.getContext('2d');sx.imageSmoothingEnabled=true;sx.clearRect(0,0,s.width,s.height);sx.drawImage(src,0,0,s.width,s.height);return s;}
- // 1) halo: the glyph shape, heavily blurred, in translucent black around the digits
- var hs=soft(gl3,14);g.save();g.globalAlpha=.9;g.imageSmoothingEnabled=true;g.drawImage(hs,0,0,W,H);g.drawImage(hs,0,0,W,H);g.restore();
- // 2) frosted glass: blurred backdrop (downscaled copy) with ~60% white over it, cut to the glyphs
- a.setTransform(1,0,0,1,0,0);a.globalCompositeOperation='source-over';a.clearRect(0,0,w,h);a.imageSmoothingEnabled=true;
- a.drawImage(soft(cv,10),0,0,w,h);a.fillStyle='rgba(255,255,255,.82)';a.fillRect(0,0,w,h);mask(a);
- // 3) rim: crisp bright white edge (~1.8 px inside the glyph), slightly brighter toward the top-left light
- b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.lineJoin='round';b.lineWidth=3.6;
- var gr=b.createLinearGradient(CX-FS*.7,CY-OY-FS*.5,CX+FS*.7,CY+OY+FS*.5);gr.addColorStop(0,'#fff');gr.addColorStop(1,'rgba(255,255,255,.85)');
- b.strokeStyle=gr;each(b,0,0,b.strokeText);mask(b);
- a.globalCompositeOperation='source-over';a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);
+ var key=hh+mm+'|'+w+'|'+h+'|'+zoom.toFixed(3),now=performance.now(),G=glassTime;
+ if(G.key!==key){G.key=key;G.t=0;
+  m.setTransform(dpr,0,0,dpr,0,0);m.clearRect(0,0,W,H);m.fillStyle='#000';each(m,0,0,m.fillText);
+  // edge field at half res: A = glyph alpha, B = blurred alpha (box blur by down/up scaling, twice)
+  var sw=Math.ceil(w/2),sh=Math.ceil(h/2);glS.width=sw;glS.height=sh;var sx=glS.getContext('2d');sx.drawImage(gl3,0,0,sw,sh);
+  var A=sx.getImageData(0,0,sw,sh).data,k=10;glSm.width=Math.ceil(sw/k);glSm.height=Math.ceil(sh/k);var tx=glSm.getContext('2d');
+  tx.clearRect(0,0,glSm.width,glSm.height);tx.drawImage(glS,0,0,glSm.width,glSm.height);sx.clearRect(0,0,sw,sh);sx.imageSmoothingEnabled=true;sx.drawImage(glSm,0,0,sw,sh);
+  var Bd=sx.getImageData(0,0,sw,sh).data,N=sw*sh,B=new Float32Array(N),In=new Uint8Array(N);
+  for(var i=0;i<N;i++){B[i]=Bd[i*4+3]/255;In[i]=A[i*4+3]>127?1:0;}
+  G.f={sw:sw,sh:sh,B:B,In:In};}
+ var f=G.f,sw=f.sw,sh=f.sh;
+ if(now-G.t>10000){G.t=now;
+  var sx=glS.getContext('2d');sx.globalCompositeOperation='source-over';sx.clearRect(0,0,sw,sh);sx.drawImage(cv,0,0,sw,sh);
+  var src=sx.getImageData(0,0,sw,sh),S_=src.data,out=sx.createImageData(sw,sh),O=out.data,B=f.B,In=f.In,sc=sw/W;
+  var MAG=1.2,STR=18*sc,L=Math.SQRT1_2;
+  for(var y=1;y<sh-1;y++)for(var x=1;x<sw-1;x++){var i=y*sw+x;if(!In[i])continue;
+   var gx=(B[i+1]-B[i-1])*.5,gy=(B[i+sw]-B[i-sw])*.5,gl=Math.hypot(gx,gy)+1e-6,edge=1-B[i];edge=edge*edge;
+   // magnify about this glyph row's centre, then bend outward near the edges (thick lens)
+   var cy=(y/sc<CY?CY-OY:CY+OY)*sc,cx=CX*sc,bx=cx+(x-cx)/MAG,by=cy+(y-cy)/MAG,dx=-gx/gl*edge*STR,dy=-gy/gl*edge*STR;
+   function smp(o,c){var u=Math.min(sw-1,Math.max(0,Math.round(bx+dx*o))),v=Math.min(sh-1,Math.max(0,Math.round(by+dy*o)));return S_[(v*sw+u)*4+c];}
+   var r=smp(1.12,0),g2=smp(1,1),bl=smp(.88,2);
+   // specular: edges whose inward normal points down-right face the top-left light; faint opposite highlight
+   var nd=(gx+gy)/gl*L,sp=Math.pow(edge,1.5)*(nd>0?nd*240:-nd*90)+edge*30;
+   var j=i*4;O[j]=Math.min(255,r*1.06+sp);O[j+1]=Math.min(255,g2*1.06+sp);O[j+2]=Math.min(255,bl*1.06+sp);O[j+3]=255;}
+  sx.putImageData(out,0,0);
+  a.setTransform(1,0,0,1,0,0);a.globalCompositeOperation='source-over';a.clearRect(0,0,w,h);a.imageSmoothingEnabled=true;a.drawImage(glS,0,0,w,h);
+  a.setTransform(dpr,0,0,dpr,0,0);a.fillStyle='rgba(255,255,255,.08)';a.fillRect(0,0,W,H);mask(a);
+  // thin crisp rim (~1.2 px inside the glyph): bright top-left, faint bottom-right
+  b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.lineJoin='round';b.lineWidth=2.4;
+  var gr=b.createLinearGradient(CX-FS*.6,CY-OY-FS*.5,CX+FS*.6,CY+OY+FS*.5);gr.addColorStop(0,'rgba(255,255,255,.95)');gr.addColorStop(.5,'rgba(255,255,255,.4)');gr.addColorStop(1,'rgba(255,255,255,.6)');
+  b.strokeStyle=gr;each(b,0,0,b.strokeText);mask(b);
+  a.globalCompositeOperation='source-over';a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);}
  g.drawImage(gl1,0,0,W,H);}
 function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom;
  // beyond the ice wall: not outer space, a calm warm neutral (the dome rests on the ice wall)
