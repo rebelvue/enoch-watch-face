@@ -13,6 +13,12 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
 
 struct FaceView: View {
     @StateObject private var loc = Locator()
+    // map zoom: 1 = whole disc, fillZoom = disc covers the whole screen (radius = half the diagonal)
+    @AppStorage("enochZoom") private var zoom: Double = 1
+    private let fillZoom: Double = {
+        let b = WKInterfaceDevice.current().screenBounds.size
+        return hypot(b.width, b.height) / 2 / (min(b.width, b.height) / 2 - 4)
+    }()
     // stars sit on the firmament's inner surface (as in world-of-enoch-3d-map); from above a star at
     // height u projects to radius sqrt(1-u^2) of the dome rim, so every star lies over the disc
     private let stars: [(Double, Double, Double, Double)] = {
@@ -25,12 +31,21 @@ struct FaceView: View {
             Canvas { g, size in draw(&g, size, ctx.date) }
         }
         .ignoresSafeArea()
+        .focusable()
+        .digitalCrownRotation($zoom, from: 1, through: fillZoom, by: 0.02, sensitivity: .low,
+                              isContinuous: false, isHapticFeedbackEnabled: true)
+        .onChange(of: zoom) { z in
+            if z <= 1.0001 || z >= fillZoom - 0.0001 { WKInterfaceDevice.current().play(.click) } // detent at both ends
+        }
+        .onTapGesture(count: 2) {
+            withAnimation(.easeInOut(duration: 0.3)) { zoom = zoom < (1 + fillZoom) / 2 ? fillZoom : 1 }
+        }
         .background(Color.black)
     }
 
     private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date) {
         let sky = Sky(date: date), d = Double.pi / 180
-        let c = CGPoint(x: size.width / 2, y: size.height / 2), R = min(size.width, size.height) / 2 - 4
+        let c = CGPoint(x: size.width / 2, y: size.height / 2), R = (min(size.width, size.height) / 2 - 4) * min(fillZoom, max(1, zoom))
         // World of Enoch projection: r = (90 - lat)/180 * R, lon 0 pointing down, east to the right
         func P(_ lat: Double, _ lon: Double) -> CGPoint {
             let r = (90 - lat) / 180 * R; return CGPoint(x: c.x + r * sin(lon * d), y: c.y + r * cos(lon * d)) }

@@ -1,11 +1,11 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Enoch Watch">
 <meta name="theme-color" content="#f6efe3"><link rel="manifest" href="manifest.json"><title>Enoch Watch Face</title>
 <style>html,body{margin:0;height:100%;background:#f6efe3;font-family:-apple-system,system-ui,sans-serif;color:#5a4632}
 body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
 .watch{background:#111;border-radius:96px;padding:18px;box-shadow:0 10px 30px rgba(90,70,50,.35)}
-canvas{display:block;border-radius:78px;width:min(82vw,396px);aspect-ratio:396/484;height:auto}
+canvas{display:block;touch-action:none;-webkit-user-select:none;user-select:none;border-radius:78px;width:min(82vw,396px);aspect-ratio:396/484;height:auto}
 p{margin:0;font-size:13px;opacity:.75;text-align:center;max-width:90vw}</style></head><body>
 <div class="watch"><canvas id="c" width="396" height="484"></canvas></div>
 <p id="info">World of Enoch watch face</p>
@@ -13,7 +13,7 @@ p{margin:0;font-size:13px;opacity:.75;text-align:center;max-width:90vw}</style><
 // Projection from World of Enoch: r = (90 - lat)/180 * R, angle = lon; lon 0 points down, east to the right.
 var cv=document.getElementById('c'),g=cv.getContext('2d'),W=396,H=484,dpr=Math.min(3,window.devicePixelRatio||1);
 cv.width=W*dpr;cv.height=H*dpr;g.scale(dpr,dpr);
-var CX=W/2,CY=H/2,R=W/2-6,D=Math.PI/180,pos={lat:47.0682,lon:21.8548,src:'default: Santandrei'};
+var CX=W/2,CY=H/2,R0=W/2-6,R=R0,D=Math.PI/180,pos={lat:47.0682,lon:21.8548,src:'default: Santandrei'};
 var nightCv=document.createElement('canvas');nightCv.width=nightCv.height=96;
 var disc=new Image();disc.src='disc.webp';disc.onload=draw;
 function P(lat,lon){var r=(90-lat)/180*R,a=lon*D;return[CX+r*Math.sin(a),CY+r*Math.cos(a)];}
@@ -28,6 +28,8 @@ function sky(ms){var n=ms/864e5-10957.5,e=(23.439-4e-7*n)*D,gst=((280.46061837+3
  var s=eq(ls,0),m=eq(lm,bm);return{sun:s,moon:m,gst:gst,ph:((lm-ls)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)};}
 // stars sit on the inner surface of the firmament dome (as in world-of-enoch-3d-map): seen from above,
 // a star at height u projects to radius sqrt(1-u^2) of the dome rim, so all stars fall inside the disc
+// zoom: 1 = whole disc, ZF = disc covers the whole screen (radius = half the diagonal)
+var ZF=Math.hypot(W,H)/2/R0,zoom=Math.min(ZF,Math.max(1,+localStorage.getItem('enochZoom')||1));
 var stars=[];(function(){var s=7;function r(){s=(s*16807)%2147483647;return s/2147483647;}
  for(var i=0;i<320;i++){var u=.04+r()*.96,mg=Math.pow(r(),3.2);stars.push([r()*360,Math.sqrt(1-u*u),.5+mg*1.4,.3+mg*.7]);}})();
 function nightAt(r,lo,sl,so){var la=(90-Math.min(r,1)*180)*D,c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);return Math.min(1,Math.max(0,(.08-c)*4));}
@@ -35,7 +37,7 @@ function moonIcon(x,y,rad,ph){g.save();g.beginPath();g.arc(x,y,rad,0,7);g.clip()
  g.fillStyle='#f4efe0';g.fillRect(x-rad,y-rad,2*rad,2*rad);
  var f=(1-Math.cos(ph))/2,off=(ph<Math.PI?-1:1)*2*rad*f;g.fillStyle='#2b3050';g.beginPath();g.arc(x+off,y,rad*1.02,0,7);g.fill();
  g.restore();g.strokeStyle='rgba(255,255,255,.7)';g.lineWidth=1;g.beginPath();g.arc(x,y,rad,0,7);g.stroke();}
-function draw(){var now=new Date(),S=sky(now.getTime());
+function draw(){var now=new Date(),S=sky(now.getTime());R=R0*zoom;
  // beyond the ice wall: not outer space, a calm warm neutral (the dome rests on the ice wall)
  g.fillStyle='#000';g.fillRect(0,0,W,H);
  // map
@@ -87,7 +89,7 @@ function moonName(p){var f=p/(2*Math.PI);return f<.03||f>.97?'NEW':f<.22?'WAX CR
 function getWx(){if(Date.now()-wx.at<18e5)return;wx.at=Date.now();
  fetch('https://api.open-meteo.com/v1/forecast?latitude='+pos.lat.toFixed(3)+'&longitude='+pos.lon.toFixed(3)+'&current=temperature_2m&hourly=precipitation_probability&forecast_hours=1').then(function(r){return r.json();}).then(function(j){wx.t=Math.round(j.current.temperature_2m);wx.p=(j.hourly&&j.hourly.precipitation_probability)?j.hourly.precipitation_probability[0]:null;}).catch(function(){});}
 var batt=null;if(navigator.getBattery)navigator.getBattery().then(function(b){batt=b;}).catch(function(){});
-function chip(x,y,al,top,big,col){g.save();g.textAlign=al;g.font='700 10px -apple-system,system-ui,sans-serif';g.fillStyle='rgba(255,255,255,.7)';g.fillText(top,x,y);
+function chip(x,y,al,top,big,col){g.save();g.shadowColor='rgba(0,0,0,.8)';g.shadowBlur=4;g.textAlign=al;g.font='700 10px -apple-system,system-ui,sans-serif';g.fillStyle='rgba(255,255,255,.7)';g.fillText(top,x,y);
  g.font='800 17px -apple-system,system-ui,sans-serif';g.fillStyle='#fff';g.fillText(big,x,y+18);g.restore();}
 function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos(S.ph))/2*100);
  g.textBaseline='middle';
@@ -98,5 +100,17 @@ function corners(now,S){getWx();var se=sunEvent(now,S),il=Math.round((1-Math.cos
  if(batt&&!away)chip(W-34,H-50,'right','BATTERY',Math.round(batt.level*100)+'%');
  else chip(W-34,H-50,'right','HOME',fmt(now,'Europe/Bucharest'),'#3d2e20');}
 if(navigator.geolocation)navigator.geolocation.getCurrentPosition(function(r){pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS'};draw();},function(){},{timeout:8000});
+function setZoom(z){zoom=Math.min(ZF,Math.max(1,z));localStorage.setItem('enochZoom',zoom);draw();}
+var anim=null;function animTo(t){var z0=zoom,t0=performance.now();cancelAnimationFrame(anim);
+ (function step(n){var k=Math.min(1,(n-t0)/280),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;setZoom(z0+(t-z0)*e);if(k<1)anim=requestAnimationFrame(step);})(t0);}
+function toggle(){animTo(zoom<(1+ZF)/2?ZF:1);}
+var pinch=null,lastTap=0;
+cv.addEventListener('touchstart',function(e){if(e.touches.length===2){var a=e.touches[0],b=e.touches[1];pinch={d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),z:zoom};e.preventDefault();}
+ else if(e.touches.length===1){var t=Date.now();if(t-lastTap<300){toggle();e.preventDefault();lastTap=0;}else lastTap=t;}},{passive:false});
+cv.addEventListener('touchmove',function(e){if(pinch&&e.touches.length===2){var a=e.touches[0],b=e.touches[1];setZoom(pinch.z*Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)/pinch.d);}e.preventDefault();},{passive:false});
+cv.addEventListener('touchend',function(e){if(e.touches.length<2)pinch=null;});
+['gesturestart','gesturechange','gestureend'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
+cv.addEventListener('wheel',function(e){e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*(e.ctrlKey?.01:.002)));},{passive:false});
+cv.addEventListener('dblclick',function(e){e.preventDefault();toggle();});
 draw();setInterval(draw,1000);
 </script></body></html>
