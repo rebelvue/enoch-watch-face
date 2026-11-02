@@ -87,9 +87,12 @@ struct FaceView: View {
 
         // stacked time
         let cal = Calendar.current, hh = String(format: "%02d", cal.component(.hour, from: date)), mm = String(format: "%02d", cal.component(.minute, from: date))
-        let font = Font.system(size: R * 0.36, weight: .heavy, design: .rounded)
-        g.draw(Text(hh).font(font).foregroundColor(.white), at: CGPoint(x: c.x, y: c.y - R * 0.17))
-        g.draw(Text(mm).font(font).foregroundColor(Color(red: 1, green: 0.85, blue: 0.54)), at: CGPoint(x: c.x, y: c.y + R * 0.17))
+        // fixed size (does not scale with map zoom): classic heavy system font, tabular digits, strong shadow
+        let base = min(size.width, size.height) / 2 - 4
+        let font = Font.system(size: base * 0.54, weight: .heavy, design: .default).monospacedDigit()
+        var tg = g; tg.addFilter(.shadow(color: .black.opacity(0.8), radius: 6, x: 0, y: 1.5))
+        tg.draw(Text(hh).font(font).foregroundColor(.white), at: CGPoint(x: c.x, y: c.y - base * 0.25))
+        tg.draw(Text(mm).font(font).foregroundColor(Color(red: 1, green: 0.85, blue: 0.54)), at: CGPoint(x: c.x, y: c.y + base * 0.25))
 
         // sun with glow
         let sp = P(sky.sunLat, sky.sunLon)

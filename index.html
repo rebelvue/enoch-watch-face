@@ -62,8 +62,8 @@ function draw(){var now=new Date(),S=sky(now.getTime());R=R0*zoom;
  g.strokeStyle='rgba(190,220,255,.9)';g.lineWidth=2;g.beginPath();g.arc(CX,CY,R,0,7);g.stroke();g.strokeStyle='rgba(120,150,190,.35)';g.lineWidth=4;g.beginPath();g.arc(CX,CY,R+3,0,7);g.stroke();
  // stacked time
  var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');
- g.textAlign='center';g.textBaseline='middle';g.font='800 64px -apple-system,system-ui,sans-serif';
- g.shadowColor='rgba(0,0,0,.55)';g.shadowBlur=10;g.fillStyle='#fff';g.fillText(hh,CX,CY-30);g.fillStyle='#ffd98a';g.fillText(mm,CX,CY+30);g.shadowBlur=0;
+ g.textAlign='center';g.textBaseline='middle';g.font="800 98px -apple-system,'SF Pro Display','Helvetica Neue',Helvetica,Arial,sans-serif";
+ g.shadowColor='rgba(0,0,0,.8)';g.shadowBlur=14;g.shadowOffsetY=2;g.fillStyle='#fff';g.fillText(hh,CX,CY-45);g.fillStyle='#ffd98a';g.fillText(mm,CX,CY+45);g.shadowBlur=0;g.shadowOffsetY=0;
  // sun
  var p=P(S.sun[0],S.sun[1]),gr=g.createRadialGradient(p[0],p[1],0,p[0],p[1],70);
  gr.addColorStop(0,'rgba(255,230,150,.6)');gr.addColorStop(1,'rgba(255,230,150,0)');g.fillStyle=gr;g.beginPath();g.arc(p[0],p[1],70,0,7);g.fill();
