@@ -278,8 +278,13 @@ struct FaceView: View {
         if abs(cc) <= 1 {
             let h0 = acos(cc) / d / 15, dn = ((sky.sunLon - me.longitude) / 15).truncatingRemainder(dividingBy: 24)
             let dn2 = dn > 12 ? dn - 24 : (dn < -12 ? dn + 24 : dn), noon = date.addingTimeInterval(dn2 * 3600)
-            let ev = (-1...1).flatMap { k in [(noon.addingTimeInterval(Double(k) * 86400 - h0 * 3600), true), (noon.addingTimeInterval(Double(k) * 86400 + h0 * 3600), false)] }
-                .filter { $0.0 > date }.sorted { $0.0 < $1.0 }
+            var ev: [(Date, Bool)] = []
+            for k in -1...1 {
+                let base: Double = Double(k) * 86400, half: Double = h0 * 3600
+                ev.append((noon.addingTimeInterval(base - half), true))
+                ev.append((noon.addingTimeInterval(base + half), false))
+            }
+            ev = ev.filter { $0.0 > date }.sorted { $0.0 < $1.0 }
             if let e = ev.first { up = e.1; sunTxt = tf.string(from: e.0) }
         }
         chip(&g, CGPoint(x: 26, y: 46), leading: true, .sun(up: up), sunTxt, .white)
@@ -295,7 +300,6 @@ struct FaceView: View {
         let dev = WKInterfaceDevice.current(); dev.isBatteryMonitoringEnabled = true
         let b = Double(dev.batteryLevel), chg = dev.batteryState == .charging || dev.batteryState == .full
         chip(&g, CGPoint(x: size.width - 26, y: size.height - 34), leading: false, .battery(level: b, charging: chg), b < 0 ? "--" : "\(Int(b * 100))%", b >= 0 && b < 0.2 ? FaceView.alert : .white)
-    }
     }
 
     /// Lambert-shaded moon sphere from the LRO texture for the current elongation (soft terminator, earthshine, limb darkening).
