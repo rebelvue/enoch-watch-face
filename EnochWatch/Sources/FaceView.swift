@@ -14,7 +14,8 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     override init() { super.init(); m.delegate = self; m.desiredAccuracy = kCLLocationAccuracyKilometer
         m.distanceFilter = 500
         if !ProcessInfo.processInfo.arguments.contains("-noLocPrompt") { m.requestWhenInUseAuthorization(); m.startUpdatingLocation() }
-        Borders.shared.locate(coord) }
+        // deferred: @StateObject builds this during a view update, so publishing here directly would warn
+        let c = coord; DispatchQueue.main.async { Borders.shared.locate(c) } }
     func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) { if let L = l.last { coord = L.coordinate; live = true
             // reverse-geocode (CLGeocoder) only after moving more than 5 km
             if placeAt.map({ L.distance(from: $0) > 5000 }) ?? true, !geo.isGeocoding {
