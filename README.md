@@ -44,8 +44,23 @@ These are the same low-precision formulas the main map uses, accurate to about 0
 - **Map projection:** r = (90 - lat) / 180 * R. Longitude 0 points down and east runs to the right.
 
 ## Zoom
-- **Web:** pinch with two fingers, double-tap, or use the mouse wheel or a trackpad pinch to zoom. It moves between the whole-disc view and a fill view where the map covers the whole screen. The last zoom is remembered in localStorage.
-- **Watch:** turn the Digital Crown to zoom, between the same two views, with a click at each end. Double-tap toggles between them. The last zoom is saved with @AppStorage.
+- Double-tap toggles between the whole-disc view and the fill view, with a spring. Web uses localStorage and the watch uses @AppStorage to remember it.
+
+## Time scrub
+- **Watch:** turn the Digital Crown to scrub time. Faster turns move faster (acceleration curve, up to 12 h per unit, clamped to 30 days). A "+3h 20m" readout appears under the date with the sign in orange. After 2 s idle it springs back to now.
+- **Web:** the mouse wheel does the same.
+
+## Always-on
+- On the watch, `isLuminanceReduced` switches to a heavily dimmed map with outline digits, dimmed comps, no scanlines, radar or motion, and a once-a-minute refresh. On the web, press A to preview it.
+
+## Detail cards
+- Tap a comp to open a clear glass card. RAIN shows the next 6 h as bars (Open-Meteo), BATTERY shows level and charging, BPM shows now plus last-hour min and max (watch only), and SUN shows sunrise, sunset and day length. Tap, turn the crown, or wait 6 s to close it.
+
+## Parallax
+- Tilt moves only the overlays, in layers: digits most, then outlines, sky and comps. The map, shading and grid stay fixed. It runs at 60 Hz through a critically damped spring and is off in always-on.
+
+## Stars
+- All white, about 1 pt, the same size. No galaxies.
 
 ## Tactical HUD style
 
@@ -60,7 +75,7 @@ Generic tactical-map look in the spirit of modern military-shooter minimaps (sty
 - Borders: the country you are in is outlined in thin orange (point-in-polygon on bundled Natural Earth 1:110m admin-0, public domain, `countries.json`, rechecked on every GPS fix), and your city in a thinner orange line (Nominatim `polygon_geojson`, cached, refetched only when the city changes, skipped if unavailable). Top line reads `CITY, COUNTRY`. Test a place with `?lat=52.2297&lon=21.0122`.
 - Subtle scanlines and film grain.
 - Sun: white-hot core with limb darkening, warm corona bloom, a short anamorphic streak. Moon: NASA LRO WAC nearside mosaic (public domain, NASA/GSFC/Arizona State University), `moon.webp` / `moon.png` 64 px, Lambert-shaded for the current elongation with a soft terminator, earthshine and limb darkening.
-- Zoom (pinch, double-tap, wheel, Digital Crown) unchanged; digits and corners stay fixed.
+- Zoom is double-tap only; the crown and wheel scrub time.
 
 ## Live data: computed vs fetched
 
