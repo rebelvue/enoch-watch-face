@@ -2,6 +2,7 @@ import CoreText
 import SwiftUI
 import CoreLocation
 import WatchKit
+import CoreMotion
 
 final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var coord = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548) // fallback: Santandrei, Bihor, Romania (home)
@@ -71,6 +72,7 @@ struct FaceView: View {
     @ObservedObject private var borders = Borders.shared
     @StateObject private var loc = Locator()
     @StateObject private var hr = HeartRate()
+    @StateObject private var motion = Motion()
     // map zoom: 1 = whole disc, fillZoom = disc covers the whole screen (radius = half the diagonal)
     @AppStorage("enochZoom") private var zoom: Double = 1
     private let fillZoom: Double = {
@@ -90,7 +92,7 @@ struct FaceView: View {
             ZStack {
                 // bottom to top: map + day/night + borders + grid, glass digits, stars + sun + moon + tags, corners and text
                 Canvas { g, size in draw(&g, size, ctx.date, 0) }
-                GlassTime(date: ctx.date).zIndex(1)
+                GlassTime(date: ctx.date, tilt: motion.tilt).zIndex(1)
                 Canvas { g, size in draw(&g, size, ctx.date, 1) }.zIndex(2).allowsHitTesting(false)
                 Canvas { g, size in draw(&g, size, ctx.date, 2) }.zIndex(3).allowsHitTesting(false)
             }
@@ -106,6 +108,8 @@ struct FaceView: View {
             withAnimation(.easeInOut(duration: 0.3)) { zoom = zoom < (1 + fillZoom) / 2 ? fillZoom : 1 }
         }
         .background(Color.black)
+        .onAppear { motion.start() }
+        .onDisappear { motion.stop() }
         .toolbar(.hidden, for: .navigationBar)
         .persistentSystemOverlays(.hidden)
     }
@@ -274,17 +278,36 @@ struct FaceView: View {
             if chg { g.fill(poly(o, [(8.5, 0), (4, 9), (7.5, 9), (6, 16), (11, 6.5), (7.5, 6.5)]), with: .color(a)) }
         }
     }
-    /// Icon + value chip inside angled brackets; icon on the outer side, value only (no text label).
-    private func chip(_ g: inout GraphicsContext, _ p: CGPoint, leading: Bool, _ icon: Icon, _ val: String, _ vcol: Color, alertOn: Bool = false) {
-        let t = g.resolve(Text(val).font(.system(size: 15, weight: .heavy, design: .monospaced)).foregroundColor(vcol))
-        let tw = t.measure(in: CGSize(width: 200, height: 40)).width, w = 16 + 5 + tw + 10, h = 26.0
-        let x0 = leading ? p.x - 5 : p.x - w + 5, y0 = p.y - h / 2
-        let ix = leading ? x0 + 5 : x0 + w - 21
-        drawIcon(&g, icon, CGPoint(x: ix, y: p.y - 8), alertOn: alertOn)
-        g.draw(t, at: CGPoint(x: leading ? ix + 21 : ix - 5, y: p.y), anchor: leading ? .leading : .trailing)
-        var b = Path(); let k = 5.0
-        for (x, y, sx, sy) in [(x0, y0, 1.0, 1.0), (x0 + w, y0, -1, 1), (x0, y0 + h, 1, -1), (x0 + w, y0 + h, -1, -1)] {
-            b.move(to: CGPoint(x: x + sx * (k + 3), y: y)); b.addLine(to: CGPoint(x: x + sx * 3, y: y)); b.addLine(to: CGPoint(x: x, y: y + sy * 3)); b.addLine(to: CGPoint(x: x, y: y + sy * (k + 1))) }
+    /// Curved complication: icon + value laid along an arc band concentric with the Enoch disc, just along its rim.
+    /// `deg` is the chip centre angle from the screen centre (screen coords: 0 = right, 90 = down). Icon on the outer side.
+    private func chip(_ g: inout GraphicsContext, _ size: CGSize, deg: Double, leading: Bool, _ icon: Icon, _ val: String, _ vcol: Color, alertOn: Bool = false) {
+        let c = CGPoint(x: size.width / 2, y: size.height / 2), R0 = min(size.width, size.height) / 2 - 4
+        let rm = R0 + 6.0, hb = 11.0, top = sin(deg * .pi / 180) < 0
+        // reading direction (left to right on screen): clockwise on the top arc, counter-clockwise on the bottom arc
+        let dir = top ? 1.0 : -1.0
+        let glyphs = val.map { g.resolve(Text(String($0)).font(.system(size: 13, weight: .heavy, design: .monospaced)).foregroundColor(vcol)) }
+        let gw = glyphs.map { $0.measure(in: CGSize(width: 40, height: 40)).width }
+        let iconL = 17.0, gap = 4.0, textL = gw.reduce(0, +), padL = 6.0
+        let total = padL + iconL + gap + textL + padL, span = total / rm
+        // items in reading order: icon first on the left chips, last on the right chips
+        let s0 = deg * .pi / 180 - dir * span / 2 // angle at the left (reading-start) end
+        func at(_ len: Double) -> (CGPoint, Double) { let t = s0 + dir * len / rm; return (CGPoint(x: c.x + rm * cos(t), y: c.y + rm * sin(t)), t) }
+        func place(_ len: Double, _ body: (inout GraphicsContext) -> Void) {
+            let (p, t) = at(len); var l = g; l.translateBy(x: p.x, y: p.y); l.rotate(by: .radians(t + dir * .pi / 2)); body(&l) }
+        var pos = padL
+        func drawText() { for (k, t) in glyphs.enumerated() { place(pos + gw[k] / 2) { $0.draw(t, at: .zero, anchor: .center) }; pos += gw[k] } }
+        func drawIc() { place(pos + iconL / 2) { l in drawIcon(&l, icon, CGPoint(x: -8, y: -8), alertOn: alertOn) }; pos += iconL }
+        if leading { drawIc(); pos += gap; drawText() } else { drawText(); pos += gap; drawIc() }
+        // bracket frame bent along the band: short arcs on the inner/outer radius at both ends, plus short radial ticks
+        let a0 = s0, a1 = s0 + dir * span, tick = 7.0
+        var b = Path()
+        for (ae, sgn) in [(a0, dir), (a1, -dir)] {
+            for r in [rm - hb, rm + hb] {
+                b.addArc(center: c, radius: r, startAngle: .radians(ae), endAngle: .radians(ae + sgn * tick / r), clockwise: sgn < 0)
+            }
+            b.move(to: CGPoint(x: c.x + (rm - hb) * cos(ae), y: c.y + (rm - hb) * sin(ae))); b.addLine(to: CGPoint(x: c.x + (rm - hb + 4) * cos(ae), y: c.y + (rm - hb + 4) * sin(ae)))
+            b.move(to: CGPoint(x: c.x + (rm + hb) * cos(ae), y: c.y + (rm + hb) * sin(ae))); b.addLine(to: CGPoint(x: c.x + (rm + hb - 4) * cos(ae), y: c.y + (rm + hb - 4) * sin(ae)))
+        }
         g.stroke(b, with: .color(.white.opacity(0.75)), lineWidth: 0.8)
     }
 
@@ -305,19 +328,20 @@ struct FaceView: View {
             ev = ev.filter { $0.0 > date }.sorted { $0.0 < $1.0 }
             if let e = ev.first { up = e.1; sunTxt = tf.string(from: e.0) }
         }
-        chip(&g, CGPoint(x: 26, y: 46), leading: true, .sun(up: up), sunTxt, .white)
+        chip(&g, size, deg: -126, leading: true, .sun(up: up), sunTxt, .white)
         // top-right: live heart rate (HealthKit); red only when abnormal (<40 or >120 BPM)
         let bpm = hr.bpm.flatMap { v in hr.at.map { date.timeIntervalSince($0) < 900 } == true ? v : nil }
         let bad = bpm.map { $0 < 40 || $0 > 120 } == true
-        chip(&g, CGPoint(x: size.width - 26, y: 46), leading: false, .heart, bpm.map { "\($0)" } ?? "--", bad ? FaceView.alert : .white, alertOn: bad)
+        // shifted down the rim (toward 3 o'clock) to stay clear of the watchOS system clock in the top-right corner
+        chip(&g, size, deg: -38, leading: false, .heart, bpm.map { "\($0)" } ?? "--", bad ? FaceView.alert : .white, alertOn: bad)
         // bottom-left: rain chance (Open-Meteo, free, no key); amber when older than 20 min
         let stale = wxOk.map { date.timeIntervalSince($0) > 1200 } ?? false
-        chip(&g, CGPoint(x: 26, y: size.height - 34), leading: true, .rain, rain.map { "\($0)%" } ?? "--", stale ? FaceView.amber : .white)
+        chip(&g, size, deg: 126, leading: true, .rain, rain.map { "\($0)%" } ?? "--", stale ? FaceView.amber : .white)
         if date.timeIntervalSince(wxAt) > 720 { DispatchQueue.main.async { fetchTemp(me) } }
         // bottom-right: watch battery (segments, bolt while charging, red below 20%)
         let dev = WKInterfaceDevice.current(); dev.isBatteryMonitoringEnabled = true
         let b = Double(dev.batteryLevel), chg = dev.batteryState == .charging || dev.batteryState == .full
-        chip(&g, CGPoint(x: size.width - 26, y: size.height - 34), leading: false, .battery(level: b, charging: chg), b < 0 ? "--" : "\(Int(b * 100))%", b >= 0 && b < 0.2 ? FaceView.alert : .white)
+        chip(&g, size, deg: 54, leading: false, .battery(level: b, charging: chg), b < 0 ? "--" : "\(Int(b * 100))%", b >= 0 && b < 0.2 ? FaceView.alert : .white)
     }
 
     /// Lambert-shaded moon sphere from the LRO texture for the current elongation (soft terminator, earthshine, limb darkening).
@@ -346,6 +370,23 @@ struct FaceView: View {
             if let data, let r = try? JSONDecoder().decode(R.self, from: data) { DispatchQueue.main.async { temp = Int(r.current.temperature_2m.rounded()); wxOk = Date(); rain = r.hourly?.precipitation_probability.first ?? nil } }
         }.resume()
     }
+}
+
+/// Wrist motion (CoreMotion gravity, 30 Hz, low-pass filtered) for the digits' rim light and parallax.
+final class Motion: ObservableObject {
+    @Published var tilt: CGPoint = .zero
+    private let mm = CMMotionManager()
+    func start() {
+        guard mm.isDeviceMotionAvailable, !mm.isDeviceMotionActive else { return }
+        mm.deviceMotionUpdateInterval = 1.0 / 30
+        mm.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in
+            guard let self, let gr = m?.gravity else { return }
+            let k = 0.12, x = max(-1, min(1, gr.x)), y = max(-1, min(1, gr.y))
+            let n = CGPoint(x: self.tilt.x + (x - self.tilt.x) * k, y: self.tilt.y + (y - self.tilt.y) * k)
+            if abs(n.x - self.tilt.x) + abs(n.y - self.tilt.y) > 0.002 { self.tilt = n }
+        }
+    }
+    func stop() { mm.stopDeviceMotionUpdates() }
 }
 
 @main struct EnochWatchApp: App { var body: some Scene { WindowGroup { FaceView().ignoresSafeArea() } } }
@@ -382,6 +423,7 @@ struct DigitsShape: Shape {
 /// lensing, adaptive tint and light-following rim itself. No extra shadows, strokes or fills.
 struct GlassTime: View {
     let date: Date
+    var tilt: CGPoint = .zero // low-pass filtered gravity x/y, -1...1
     var body: some View {
         GeometryReader { geo in
             let cal = Calendar.current
@@ -396,10 +438,14 @@ struct GlassTime: View {
                 } else {
                     shape.fill(.ultraThinMaterial.opacity(0.5))
                 }
+                // the light source follows the wrist: tilting moves the bright edge around the glyphs
+                let lx = min(1, max(0, 0.1 - Double(tilt.x) * 0.9)), ly = min(1, max(0, 0.1 + Double(tilt.y) * 0.9))
                 shape.stroke(LinearGradient(colors: [.white.opacity(0.95), .white.opacity(0.35), .white.opacity(0.6)],
-                                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+                                            startPoint: UnitPoint(x: lx, y: ly), endPoint: UnitPoint(x: 1 - lx, y: 1 - ly)), lineWidth: 1)
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            // parallax: digits float a few points above the map
+            .offset(x: tilt.x * 3.5, y: -tilt.y * 3.5)
         }
         .allowsHitTesting(false)
     }

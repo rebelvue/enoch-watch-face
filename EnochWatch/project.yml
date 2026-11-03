@@ -15,6 +15,7 @@ targets:
         NSLocationWhenInUseUsageDescription: Shows your position on the flat-earth map.
         UIAppFonts: [ChakraPetch-BoldItalic.ttf]
         NSHealthShareUsageDescription: Shows your live heart rate on the watch face.
+        NSMotionUsageDescription: Tilts the light and depth of the time digits as you move your wrist.
     entitlements:
       path: EnochWatch.entitlements
       properties:
