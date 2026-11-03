@@ -51,7 +51,16 @@ These are the same low-precision formulas the main map uses, accurate to about 0
 - **Web:** the mouse wheel does the same.
 
 ## Always-on
-- On the watch, `isLuminanceReduced` switches to a heavily dimmed map with outline digits, dimmed comps, no scanlines, radar or motion, and a once-a-minute refresh. On the web, press A to preview it.
+- When the watch dims (`isLuminanceReduced`, wrist down) the face goes black-and-white and flat. Map, digits, outlines, comps, text, stars and grid are all greyscale (no orange), with no parallax, glass, rim light or sheen. Only the sun and the moon keep their colour, drawn in their own layer above the greyscale layers. On the web, press A to preview it.
+- Battery: in always-on the watch
+  - redraws once a minute (`TimelineView(.everyMinute)`, no animation schedule, no seconds),
+  - stops CoreMotion (device motion and accelerometer) and restarts it on wake,
+  - stops the HealthKit heart-rate query and keeps the last value, resuming on wake,
+  - skips weather fetches and refreshes on wake,
+  - runs no springs or animations, and skips the crown, scrub and detail-card timers,
+  - reuses the cached day/night shading render (rebuilt only when the sun moves about 0.25 deg),
+  - dims the map to mostly black for OLED.
+- The web preview also drops to one redraw a minute and pauses tilt, springs and weather.
 
 ## Detail cards
 - Tap a comp to open a clear glass card. RAIN shows the next 6 h as bars (Open-Meteo), BATTERY shows level and charging, BPM shows now plus last-hour min and max (watch only), and SUN shows sunrise, sunset and day length. Tap, turn the crown, or wait 6 s to close it.
