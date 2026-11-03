@@ -274,7 +274,7 @@ struct FaceView: View {
             // night side: solar elevation on the globe, sampled on a coarse grid
             // smooth shading: per-cell values go into two small bitmaps that are drawn scaled up with
             // interpolation, so there are no cell squares or seams (filled cells used to overlap into a visible grid)
-            if let sh = Self.shade(n: 64, sunLat: sky.sunLat * d, sunLon: sky.sunLon * d) {
+            if let sh = Self.shade(n: 64, sunLat: sky.sunLat * d, sunLon: sky.sunLon * d, nightMax: aod ? 0.93 : 0.5) {
                 l.draw(Image(decorative: sh.0, scale: 1).interpolation(.high), in: disc)
                 l.blendMode = .screen; l.draw(Image(decorative: sh.1, scale: 1).interpolation(.high), in: disc); l.blendMode = .normal
             }
@@ -399,13 +399,13 @@ struct FaceView: View {
     /// Night (black, alpha 0.9*(1-t)) and day (grey 0.32 screen, alpha t) shading maps over the disc's bounding square.
     /// Day/night shading cache: rebuilt only when the sun moves about 0.25 deg (once a minute or so; always-on reuses it).
     private static var shadeCache: (key: String, img: (CGImage, CGImage))?
-    private static func shade(n: Int, sunLat sl: Double, sunLon so: Double) -> (CGImage, CGImage)? {
+    private static func shade(n: Int, sunLat sl: Double, sunLon so: Double, nightMax: Double) -> (CGImage, CGImage)? {
         guard sl.isFinite, so.isFinite, n > 0, n <= 256 else { return nil }
-        let key = "\(n):\(Int((sl * 229.18).rounded())):\(Int((so * 229.18).rounded()))"
+        let key = "\(nightMax):\(n):\(Int((sl * 229.18).rounded())):\(Int((so * 229.18).rounded()))"
         if let c = shadeCache, c.key == key { return c.img }
-        let r = shadeBuild(n: n, sunLat: sl, sunLon: so); if let r { shadeCache = (key, r) }; return r
+        let r = shadeBuild(n: n, sunLat: sl, sunLon: so, nightMax: nightMax); if let r { shadeCache = (key, r) }; return r
     }
-    private static func shadeBuild(n: Int, sunLat sl: Double, sunLon so: Double) -> (CGImage, CGImage)? {
+    private static func shadeBuild(n: Int, sunLat sl: Double, sunLon so: Double, nightMax: Double) -> (CGImage, CGImage)? {
         let d = Double.pi / 180
         var night = [UInt8](repeating: 0, count: n * n * 4), day = [UInt8](repeating: 0, count: n * n * 4)
         for j in 0..<n { for i in 0..<n {
@@ -414,7 +414,7 @@ struct FaceView: View {
             let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
             var t = min(1, max(0, (e + 0.309) / 0.517)); t = t * t * (3 - 2 * t)
             let k = (j * n + i) * 4
-            night[k + 3] = UInt8(255 * 0.93 * (1 - t))                   // premultiplied black
+            night[k + 3] = UInt8(255 * nightMax * (1 - t))               // premultiplied black; active 0.5 (lands readable), always-on 0.93
             let a = 255 * t, v = UInt8(a * 0.12); day[k] = v; day[k + 1] = v; day[k + 2] = v; day[k + 3] = UInt8(a)
         } }
         func img(_ px: [UInt8]) -> CGImage? {

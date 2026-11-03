@@ -17,7 +17,7 @@ var cv=document.getElementById('c'),g=cv.getContext('2d'),W=396,H=484,dpr=Math.m
 cv.width=W*dpr;cv.height=H*dpr;g.scale(dpr,dpr);
 var CX=W/2,CY=H/2,R0=W/2-6,R=R0,D=Math.PI/180,pos={lat:47.0682,lon:21.8548,src:'default: Santandrei'};
 var nightCv=document.createElement('canvas');nightCv.width=nightCv.height=96;
-var litCv=document.createElement('canvas');litCv.width=litCv.height=512;var discDay=null,discNight=null;
+var litCv=document.createElement('canvas');litCv.width=litCv.height=512;var discDay=null,discNight=null,discNightAod=null;
 function gradeDisc(){if(discDay)return true;if(!disc.complete||!disc.naturalWidth)return false;
  // Safari has no CanvasRenderingContext2D.filter, so grade with plain compositing (works in every browser):
  // gain g = exposure multiplier (1 = original). Gain > 1 adds the map onto itself ('lighter'); gain < 1 lays black over it.
@@ -26,7 +26,8 @@ function gradeDisc(){if(discDay)return true;if(!disc.complete||!disc.naturalWidt
   else{x.globalCompositeOperation='source-atop';x.globalAlpha=1-gain;x.fillStyle='#000';x.fillRect(0,0,1024,1024);}
   x.globalAlpha=1;x.globalCompositeOperation='source-over';return c;}
  discDay=mk(1.55); // sunlit: original map, exposure raised, natural colours
- discNight=mk(.1); // night: original map darkened to ~10%, near black
+ discNight=mk(.5); // night (active): map at ~50%, lands and colours still readable
+ discNightAod=mk(.1); // night (always-on): ~10%, unchanged
  return true;}
 var disc=new Image();disc.src='disc.webp';disc.onload=draw;
 function P(lat,lon){var r=(90-lat)/180*R,a=lon*D;return[CX+r*Math.sin(a),CY+r*Math.cos(a)];}
@@ -158,7 +159,7 @@ function draw(){var now=new Date(Date.now()+TOFF+SCS),S=sky(now.getTime());R=R0*
   var la=(90-Math.min(r,1)*180)*D,lo=Math.atan2(dx,dy),c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);
   var t=Math.min(1,Math.max(0,(c+.309)/.517)); /* wide twilight feather: sun elevation -18 to +12 deg, no edge */t=t*t*(3-2*t);img.data[k]=img.data[k+1]=img.data[k+2]=255;img.data[k+3]=Math.round(255*t);}
  sh.putImageData(img,0,0);
- if(gradeDisc()){g.imageSmoothingEnabled=true;g.drawImage(discNight,CX-R,CY-R,2*R,2*R);
+ if(gradeDisc()){g.imageSmoothingEnabled=true;g.drawImage(AOD?discNightAod:discNight,CX-R,CY-R,2*R,2*R);
   var lx=litCv.getContext('2d');lx.globalCompositeOperation='source-over';lx.clearRect(0,0,512,512);lx.drawImage(discDay,0,0,512,512);
   lx.globalCompositeOperation='destination-in';lx.imageSmoothingEnabled=true;lx.drawImage(nightCv,0,0,512,512);
   g.drawImage(litCv,CX-R,CY-R,2*R,2*R);}
