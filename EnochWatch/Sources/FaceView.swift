@@ -205,7 +205,7 @@ struct FaceView: View {
         g.drawLayer { l in
             l.clip(to: Path(ellipseIn: disc))
             // current country (thin orange) and city (thinner orange) boundaries, projected like the map
-            let orange = Color(red: 1, green: 0.55, blue: 0.1)
+            let orange = FaceView.orange
             func ringPath(_ rg: [[Double]]) -> Path { var p = Path()
                 for (k, v) in rg.enumerated() { let rr = (90 - v[1]) / 180 * R, a = v[0] * d, pt = CGPoint(x: c.x + rr * sin(a), y: c.y + rr * cos(a)); k == 0 ? p.move(to: pt) : p.addLine(to: pt) }
                 p.closeSubpath(); return p }
@@ -241,7 +241,7 @@ struct FaceView: View {
                 if !ko.contains(where: { $0.intersects(r) }) { o = q; break } }
             g.draw(rt, at: o, anchor: .leading) }
         // sun: warm corona bloom, anamorphic streak, white-hot limb-darkened photosphere
-        let amb = Color(red: 1, green: 0.69, blue: 0.23), sp = P(sky.sunLat, sky.sunLon)
+        let amb = FaceView.orange, sp = P(sky.sunLat, sky.sunLon)
         var sg = g; sg.blendMode = .plusLighter
         sg.fill(Path(ellipseIn: CGRect(x: sp.x - 32, y: sp.y - 32, width: 64, height: 64)), with: .radialGradient(Gradient(stops: [
             .init(color: Color(red: 1, green: 0.84, blue: 0.55).opacity(0.55), location: 0), .init(color: Color(red: 1, green: 0.66, blue: 0.27).opacity(0.18), location: 0.3),
@@ -260,7 +260,7 @@ struct FaceView: View {
         tag(mp, "MOON \(Int((1 - cos(sky.phase)) / 2 * 100))%", amb)
         }
         if layer == 2 {
-        let amb = Color(red: 1, green: 0.69, blue: 0.23)
+        let amb = FaceView.orange
 
         // you: position (no marker; borders and top line show it), LOC and HOME distance / bearing (great circle)
         let la = loc.coord.latitude, lo = loc.coord.longitude
@@ -307,8 +307,9 @@ struct FaceView: View {
     @State private var wxOk: Date? = nil
     private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
 
-    private static let mint = Color(red: 0.75, green: 0.96, blue: 0.82), amber = Color(red: 1, green: 0.69, blue: 0.23), alert = Color(red: 1, green: 0.29, blue: 0.24)
-    private static let orange = Color(red: 1, green: 0.55, blue: 0.1)
+    private static let mint = Color(red: 0.75, green: 0.96, blue: 0.82), amber = FaceView.orange, alert = Color(red: 1, green: 0.29, blue: 0.24)
+    /// the one UI orange (#FF8C1A) used by every orange element: borders, labels, date, tags
+    static let orange = Color(red: 1, green: 140.0 / 255, blue: 26.0 / 255)
     /// Text laid along a circle of radius r around the screen centre, centred on angle `deg` (0 = right, 90 = down),
     /// always reading left to right and upright (top half: glyph tops point outward; bottom half: inward).
     private func arcText(_ g: inout GraphicsContext, _ size: CGSize, _ s: String, _ font: Font, _ col: Color, deg: Double, r: Double, track: Double = 0) {

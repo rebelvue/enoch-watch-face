@@ -43,7 +43,7 @@ function sky(ms){var n=ms/864e5-10957.5,e=(23.439-4e-7*n)*D,gst=((280.46061837+3
 // a star at height u projects to radius sqrt(1-u^2) of the dome rim, so all stars fall inside the disc
 // zoom: 1 = whole disc, ZF = disc covers the whole screen (radius = half the diagonal)
 var ZF=Math.hypot(W,H)/2/R0,zoom=Math.min(ZF,Math.max(1,+localStorage.getItem('enochZoom')||1));
-var ACC='#bff5d2',AMB='#ffb13b',ALR='#ff4a3d',MONO="'JBM',ui-monospace,'SF Mono',Menlo,monospace";
+var ACC='#bff5d2',AMB='#ff8c1a',ALR='#ff4a3d',MONO="'JBM',ui-monospace,'SF Mono',Menlo,monospace";
 var stars=[];fetch('stars.json').then(function(r){return r.json();}).then(function(j){stars=j;}).catch(function(){});
 function nightAt(r,lo,sl,so){var la=(90-Math.min(r,1)*180)*D,c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);return Math.min(1,Math.max(0,(.08-c)*4));}
 var moonTex=new Image();moonTex.src='moon.webp';var moonCv=document.createElement('canvas'),moonKey='';moonCv.width=moonCv.height=64;
@@ -218,7 +218,7 @@ function getCity(n,la,lo){if(n===bd.cityName||bd.cityBusy)return;var k='enochCit
    if(g.type==='Polygon')r=g.coordinates;else if(g.type==='MultiPolygon')g.coordinates.forEach(function(p){r=r.concat(p);});
    r=r.map(function(rg){return rg.map(function(v){return[+v[0].toFixed(3),+v[1].toFixed(3)];});});bd.city=r;try{localStorage.setItem(k,JSON.stringify(r));}catch(e){}})
   .catch(function(){}).finally(function(){bd.cityBusy=false;});}
-function drawBorders(){locateCountry();var OR='#ff8c1a';
+function drawBorders(){locateCountry();var OR=AMB;
  function ring(rg){g.beginPath();rg.forEach(function(v,i){var p=P(v[1],v[0]);i?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1]);});g.closePath();g.stroke();}
  g.save();g.lineJoin='round';g.strokeStyle=OR;
  if(bd.country){g.lineWidth=1.1;bd.country[1].forEach(function(p){p.forEach(ring);});}
@@ -250,7 +250,7 @@ function arcText(t,font,col,deg,r,track){g.save();g.font=font;track=track||0;var
 // curved corner complication: small orange label stacked over a bigger white value along the rim (no icon, no frame);
 // "on top" is outward on the upper rim and inward on the lower rim. Value colour carries the alert state.
 function ichip(deg,label,val,vcol){var top=Math.sin(deg*D)<0,rl=top?R0+29:R0+6,rv=top?R0+11:R0+24;
- arcText(label,'800 11px '+MONO,'#ff8c1a',deg,rl,1);arcText(val,'800 21px '+MONO,vcol||'#fff',deg,rv);}
+ arcText(label,'800 11px '+MONO,AMB,deg,rl,1);arcText(val,'800 21px '+MONO,vcol||'#fff',deg,rv);}
 function corners(now,S){getWx();var se=sunEvent(now,S);
  // top-left: next sunrise or sunset at your position
  ichip(-126,se[1]==='SET'?'SUNSET':'SUNRISE',se[0]);
