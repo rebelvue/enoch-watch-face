@@ -122,6 +122,8 @@ struct FaceView: View {
         .onDisappear { motion.stop() }
         .toolbar(.hidden, for: .navigationBar)
         .persistentSystemOverlays(.hidden)
+        // hides the watchOS status-bar time (SwiftUI underscored modifier, present in the public SDK interface)
+        ._statusBarHidden(true)
     }
 
     private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ layer: Int) {
