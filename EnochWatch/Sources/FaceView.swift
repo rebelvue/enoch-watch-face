@@ -74,7 +74,7 @@ struct FaceView: View {
     @ObservedObject private var borders = Borders.shared
     @StateObject private var loc = Locator()
     @StateObject private var hr = HeartRate()
-    @StateObject private var motion = Motion()
+    @State private var motion = Motion()
     // map zoom: 1 = whole disc, fillZoom = disc covers the whole screen (radius = half the diagonal)
     @FocusState private var crownFocus: Bool
     @AppStorage("enochZoom") private var zoom: Double = 1
@@ -90,14 +90,28 @@ struct FaceView: View {
     }()
     private let moonTex: CGImage? = UIImage(named: "moon")?.cgImage
 
+    // crown value may run a little past [1, fillZoom] (rubber band); the drawn zoom is a per-frame spring toward it
+    @State private var crown: Double = 1
+    @State private var zs = ZoomSpring()
+    @State private var fast = false
+    @State private var crownAt = Date.distantPast
+    private var lo: Double { 0.82 }
+    private var hi: Double { fillZoom + 0.35 }
+    /// rubber band: past either limit the map only follows 40% of the crown
+    private func rubber(_ v: Double) -> Double { v < 1 ? 1 - (1 - v) * 0.4 : v > fillZoom ? fillZoom + (v - fillZoom) * 0.4 : v }
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.1)) { ctx in
+        // 60 fps while the zoom spring moves, 30 fps otherwise (wrist motion drives the glass light every frame)
+        TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : 1.0 / 30)) { ctx in
+            let tilt = motion.read(ctx.date)
+            let _ = zs.step(to: rubber(crown), at: ctx.date)
             ZStack {
-                // bottom to top: map + day/night + borders + grid, glass digits, stars + sun + moon + tags, corners and text
+                // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon + tags, comps and text
                 Canvas { g, size in draw(&g, size, ctx.date, 0) }
-                GlassTime(date: ctx.date, tilt: motion.tilt).zIndex(1)
-                Canvas { g, size in draw(&g, size, ctx.date, 1) }.zIndex(2).allowsHitTesting(false)
-                Canvas { g, size in draw(&g, size, ctx.date, 2) }.zIndex(3).allowsHitTesting(false)
+                GlassTime(date: ctx.date, tilt: tilt).zIndex(1)
+                Canvas { g, size in draw(&g, size, ctx.date, 3) }.zIndex(2).allowsHitTesting(false)
+                Canvas { g, size in draw(&g, size, ctx.date, 1) }.zIndex(3).allowsHitTesting(false)
+                Canvas { g, size in draw(&g, size, ctx.date, 2) }.zIndex(4).allowsHitTesting(false)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -106,16 +120,30 @@ struct FaceView: View {
         // crown attached to a concrete, framed, focused view (avoids "Crown Sequencer was set up without a view property")
         .focusable(true)
         .focused($crownFocus)
-        .digitalCrownRotation($zoom, from: 1, through: fillZoom, by: 0.02, sensitivity: .low,
+        .digitalCrownRotation($crown, from: lo, through: hi, by: 0.01, sensitivity: .low,
                               isContinuous: false, isHapticFeedbackEnabled: true)
-        .onChange(of: zoom) { z in
-            if z <= 1.0001 || z >= fillZoom - 0.0001 { WKInterfaceDevice.current().play(.click) } // detent at both ends
+        .onChange(of: crown) { old, v in
+            crownAt = Date(); fast = true
+            let wasIn = old >= 1 && old <= fillZoom, isIn = v >= 1 && v <= fillZoom
+            if wasIn && !isIn { WKInterfaceDevice.current().play(.click) } // detent as you pass either end
+            zoom = min(fillZoom, max(1, v))
         }
         .onTapGesture(count: 2) {
-            withAnimation(.easeInOut(duration: 0.3)) { zoom = zoom < (1 + fillZoom) / 2 ? fillZoom : 1 }
+            // spring to the other end (the spring itself overshoots a little and settles)
+            crown = zoom < (1 + fillZoom) / 2 ? fillZoom : 1
+        }
+        // released past a limit: snap the crown back so the spring rubber-bands to the limit; drop to 30 fps once settled
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 80_000_000)
+                let idle = Date().timeIntervalSince(crownAt) > 0.22
+                if idle && (crown < 1 || crown > fillZoom) { crown = min(fillZoom, max(1, crown)) }
+                let f = zs.moving || !idle
+                if f != fast { fast = f }
+            }
         }
         .background(Color.black)
-        .onAppear { motion.start(); crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
+        .onAppear { crown = min(fillZoom, max(1, zoom)); zs.reset(crown); motion.start(); crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
         // weather fetch lives outside the draw path: every 12 min, and when the location moves
         .task { while !Task.isCancelled { fetchTemp(loc.coord); try? await Task.sleep(nanoseconds: 720_000_000_000) } }
         .onChange(of: loc.live) { _ in fetchTemp(loc.coord) }
@@ -128,7 +156,7 @@ struct FaceView: View {
 
     private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ layer: Int) {
         let sky = Sky(date: date), d = Double.pi / 180
-        let c = CGPoint(x: size.width / 2, y: size.height / 2), R = (min(size.width, size.height) / 2 - 4) * min(fillZoom, max(1, zoom))
+        let c = CGPoint(x: size.width / 2, y: size.height / 2), R = (min(size.width, size.height) / 2 - 4) * zs.x
         // World of Enoch projection: r = (90 - lat)/180 * R, lon 0 pointing down, east to the right
         func P(_ lat: Double, _ lon: Double) -> CGPoint {
             let r = (90 - lat) / 180 * R; return CGPoint(x: c.x + r * sin(lon * d), y: c.y + r * cos(lon * d)) }
@@ -150,13 +178,6 @@ struct FaceView: View {
                 l.draw(Image(decorative: sh.0, scale: 1).interpolation(.high), in: disc)
                 l.blendMode = .screen; l.draw(Image(decorative: sh.1, scale: 1).interpolation(.high), in: disc); l.blendMode = .normal
             }
-            // current country (thin orange) and city (thinner orange) boundaries, projected like the map
-            let orange = Color(red: 1, green: 0.55, blue: 0.1)
-            func ringPath(_ rg: [[Double]]) -> Path { var p = Path()
-                for (k, v) in rg.enumerated() { let rr = (90 - v[1]) / 180 * R, a = v[0] * d, pt = CGPoint(x: c.x + rr * sin(a), y: c.y + rr * cos(a)); k == 0 ? p.move(to: pt) : p.addLine(to: pt) }
-                p.closeSubpath(); return p }
-            if let k = borders.country { for poly in k.polys { for rg in poly { l.stroke(ringPath(rg), with: .color(orange), lineWidth: 0.9) } } }
-            for rg in borders.city { l.stroke(ringPath(rg), with: .color(orange.opacity(0.9)), lineWidth: 0.5) }
             // firmament dome from above: clear crown, pale blue sheen at the rim resting on the ice wall
             l.fill(Path(ellipseIn: disc), with: .radialGradient(Gradient(stops: [
                 .init(color: Color(red: 0.75, green: 0.94, blue: 0.82).opacity(0.03), location: 0),
@@ -178,6 +199,20 @@ struct FaceView: View {
             p.move(to: CGPoint(x: c.x + (R - len) * sin(a), y: c.y + (R - len) * cos(a))); p.addLine(to: CGPoint(x: c.x + R * sin(a), y: c.y + R * cos(a)))
             g.stroke(p, with: .color(acc), lineWidth: k % 3 == 0 ? 1 : 0.6) }
         }
+        if layer == 3 {
+        // current country and city outlines, drawn above the glass digits so your location reads through them
+        let disc = CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R)
+        g.drawLayer { l in
+            l.clip(to: Path(ellipseIn: disc))
+            // current country (thin orange) and city (thinner orange) boundaries, projected like the map
+            let orange = Color(red: 1, green: 0.55, blue: 0.1)
+            func ringPath(_ rg: [[Double]]) -> Path { var p = Path()
+                for (k, v) in rg.enumerated() { let rr = (90 - v[1]) / 180 * R, a = v[0] * d, pt = CGPoint(x: c.x + rr * sin(a), y: c.y + rr * cos(a)); k == 0 ? p.move(to: pt) : p.addLine(to: pt) }
+                p.closeSubpath(); return p }
+            if let k = borders.country { for poly in k.polys { for rg in poly { l.stroke(ringPath(rg), with: .color(orange), lineWidth: 0.9) } } }
+            for rg in borders.city { l.stroke(ringPath(rg), with: .color(orange.opacity(0.9)), lineWidth: 0.5) }
+        }
+        }
         if layer == 1 {
         let disc = CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R), sl = sky.sunLat * d, so = sky.sunLon * d
         g.drawLayer { l in
@@ -197,7 +232,7 @@ struct FaceView: View {
             let rt = g.resolve(Text(t).font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundColor(col))
             let w = rt.measure(in: CGSize(width: 200, height: 20)).width, W = size.width, H = size.height
             let ko = [CGRect(x: 0, y: 0, width: W, height: 28), CGRect(x: 0, y: H - 20, width: W, height: 20),
-                      CGRect(x: 0, y: 0, width: 68, height: 72), CGRect(x: W - 72, y: 0, width: 72, height: 92),
+                      CGRect(x: 0, y: 0, width: 68, height: 72), CGRect(x: W - 68, y: 0, width: 68, height: 72),
                       CGRect(x: 0, y: H - 64, width: 68, height: 64), CGRect(x: W - 68, y: H - 64, width: 68, height: 64)]
             let opts = [CGPoint(x: p.x + 9, y: p.y - 9), CGPoint(x: p.x - 9 - w, y: p.y - 9), CGPoint(x: p.x + 9, y: p.y + 9), CGPoint(x: p.x - 9 - w, y: p.y + 9)]
             var o = CGPoint(x: min(W - 4 - w, max(4, p.x + 9)), y: min(H - 26, max(34, p.y - 9)))
@@ -272,42 +307,28 @@ struct FaceView: View {
     @State private var wxOk: Date? = nil
     private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
 
-    /// CoD MW-inspired original HUD icons (flat, angular), 16x16 box with origin at top-left.
-    private enum Icon { case sun(up: Bool), heart, rain, battery(level: Double, charging: Bool) }
     private static let mint = Color(red: 0.75, green: 0.96, blue: 0.82), amber = Color(red: 1, green: 0.69, blue: 0.23), alert = Color(red: 1, green: 0.29, blue: 0.24)
-    private func poly(_ o: CGPoint, _ pts: [(Double, Double)], close: Bool = true) -> Path {
-        var p = Path(); p.addLines(pts.map { CGPoint(x: o.x + $0.0, y: o.y + $0.1) }); if close { p.closeSubpath() }; return p }
-    /// SF Symbols (Apple, licensed for use in apps on Apple platforms), always orange like the borders; red only in alert states.
-    private func drawIcon(_ g: inout GraphicsContext, _ icon: Icon, _ o: CGPoint, alertOn: Bool = false) {
-        let orange = Color(red: 1, green: 0.55, blue: 0.1)
-        var name = "", col = alertOn ? FaceView.alert : orange
-        switch icon {
-        case .sun(let up): name = up ? "sunrise.fill" : "sunset.fill"
-        case .heart: name = "heart.fill"
-        case .rain: name = "drop.fill"
-        case .battery(let lv, let chg):
-            if lv >= 0 && lv < 0.2 { col = FaceView.alert }
-            name = chg ? "battery.100.bolt" : lv < 0 ? "battery.0" : lv > 0.875 ? "battery.100" : lv > 0.625 ? "battery.75" : lv > 0.375 ? "battery.50" : lv > 0.1 ? "battery.25" : "battery.0"
-        }
-        var im = g.resolve(Image(systemName: name)); im.shading = .color(col)
-        let sz = im.size, k = 15 / max(sz.width, sz.height)
-        g.draw(im, in: CGRect(x: o.x + 8 - sz.width * k / 2, y: o.y + 8 - sz.height * k / 2, width: sz.width * k, height: sz.height * k))
+    private static let orange = Color(red: 1, green: 0.55, blue: 0.1)
+    /// Text laid along a circle of radius r around the screen centre, centred on angle `deg` (0 = right, 90 = down),
+    /// always reading left to right and upright (top half: glyph tops point outward; bottom half: inward).
+    private func arcText(_ g: inout GraphicsContext, _ size: CGSize, _ s: String, _ font: Font, _ col: Color, deg: Double, r: Double, track: Double = 0) {
+        let c = CGPoint(x: size.width / 2, y: size.height / 2), top = sin(deg * .pi / 180) < 0, dir = top ? 1.0 : -1.0
+        let glyphs = s.map { g.resolve(Text(String($0)).font(font).foregroundColor(col)) }
+        let gw = glyphs.map { $0.measure(in: CGSize(width: 40, height: 40)).width + track }
+        var pos = deg * .pi / 180 - dir * gw.reduce(0, +) / r / 2
+        for (k, t) in glyphs.enumerated() {
+            let a = pos + dir * gw[k] / 2 / r; var l = g
+            l.translateBy(x: c.x + r * cos(a), y: c.y + r * sin(a)); l.rotate(by: .radians(a + dir * .pi / 2))
+            l.draw(t, at: .zero, anchor: .center); pos += dir * gw[k] / r }
     }
-    /// Curved complication: icon + value laid along the disc rim (no frame). `deg` = centre angle from the screen centre
-    /// (0 = right, 90 = down). Icon on the outer side; value always white.
-    private func chip(_ g: inout GraphicsContext, _ size: CGSize, deg: Double, leading: Bool, _ icon: Icon, _ val: String, _ vcol: Color, alertOn: Bool = false) {
-        let c = CGPoint(x: size.width / 2, y: size.height / 2), R0 = min(size.width, size.height) / 2 - 4
-        let rm = R0 + 6.0, top = sin(deg * .pi / 180) < 0, dir = top ? 1.0 : -1.0
-        let glyphs = val.map { g.resolve(Text(String($0)).font(.system(size: 13, weight: .heavy, design: .monospaced)).foregroundColor(.white)) }
-        let gw = glyphs.map { $0.measure(in: CGSize(width: 40, height: 40)).width }
-        let iconL = 16.0, gap = 3.0, total = iconL + gap + gw.reduce(0, +), s0 = deg * .pi / 180 - dir * total / rm / 2
-        func place(_ len: Double, _ body: (inout GraphicsContext) -> Void) {
-            let t = s0 + dir * len / rm; var l = g
-            l.translateBy(x: c.x + rm * cos(t), y: c.y + rm * sin(t)); l.rotate(by: .radians(t + dir * .pi / 2)); body(&l) }
-        var pos = 0.0
-        func drawText() { for (k, t) in glyphs.enumerated() { place(pos + gw[k] / 2) { $0.draw(t, at: .zero, anchor: .center) }; pos += gw[k] } }
-        func drawIc() { place(pos + iconL / 2) { l in drawIcon(&l, icon, CGPoint(x: -8, y: -8), alertOn: alertOn) }; pos += iconL }
-        if leading { drawIc(); pos += gap; drawText() } else { drawText(); pos += gap; drawIc() }
+    /// Curved complication: small orange label stacked over a bigger white value, both following the rim (no icon, no frame).
+    /// Value colour carries the alert state.
+    private func chip(_ g: inout GraphicsContext, _ size: CGSize, deg: Double, _ label: String, _ val: String, _ vcol: Color) {
+        let R0 = min(size.width, size.height) / 2 - 4, top = sin(deg * .pi / 180) < 0
+        // "on top" = outward on the upper rim, inward on the lower rim (glyphs are upright on both)
+        let rl = top ? R0 + 16 : R0 + 1, rv = top ? R0 + 4 : R0 + 12
+        arcText(&g, size, label, .system(size: 7.5, weight: .heavy, design: .monospaced), FaceView.orange, deg: deg, r: rl, track: 0.6)
+        arcText(&g, size, val, .system(size: 14, weight: .heavy, design: .monospaced), vcol, deg: deg, r: rv)
     }
 
     private func corners(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ sky: Sky) {
@@ -327,19 +348,19 @@ struct FaceView: View {
             ev = ev.filter { $0.0 > date }.sorted { $0.0 < $1.0 }
             if let e = ev.first { up = e.1; sunTxt = tf.string(from: e.0) }
         }
-        chip(&g, size, deg: -126, leading: true, .sun(up: up), sunTxt, .white)
+        chip(&g, size, deg: -126, up ? "SUNRISE" : "SUNSET", sunTxt, .white)
         // top-right: live heart rate (HealthKit); red only when abnormal (<40 or >120 BPM)
         let bpm = hr.bpm.flatMap { v in hr.at.map { date.timeIntervalSince($0) < 900 } == true ? v : nil }
         let bad = bpm.map { $0 < 40 || $0 > 120 } == true
-        // shifted down the rim (toward 3 o'clock) to stay clear of the watchOS system clock in the top-right corner
-        chip(&g, size, deg: -31, leading: false, .heart, bpm.map { "\($0)" } ?? "--", bad ? FaceView.alert : .white, alertOn: bad)
+        // mirrored with the sunrise comp (the status-bar clock is hidden, so both top comps sit at the same height)
+        chip(&g, size, deg: -54, "BPM", bpm.map { "\($0)" } ?? "--", bad ? FaceView.alert : .white)
         // bottom-left: rain chance (Open-Meteo, free, no key); amber when older than 20 min
         let stale = wxOk.map { date.timeIntervalSince($0) > 1200 } ?? false
-        chip(&g, size, deg: 126, leading: true, .rain, rain.map { "\($0)%" } ?? "--", stale ? FaceView.amber : .white)
-        // bottom-right: watch battery (segments, bolt while charging, red below 20%)
+        chip(&g, size, deg: 126, "RAIN", rain.map { "\($0)%" } ?? "--", stale ? FaceView.amber : .white)
+        // bottom-right: watch battery (red below 20%)
         let dev = WKInterfaceDevice.current()
-        let b = Double(dev.batteryLevel), chg = dev.batteryState == .charging || dev.batteryState == .full
-        chip(&g, size, deg: 54, leading: false, .battery(level: b, charging: chg), b < 0 ? "--" : "\(Int(b * 100))%", b >= 0 && b < 0.2 ? FaceView.alert : .white)
+        let b = Double(dev.batteryLevel)
+        chip(&g, size, deg: 54, "BATTERY", b < 0 ? "--" : "\(Int(b * 100))%", b >= 0 && b < 0.2 ? FaceView.alert : .white)
     }
 
     /// Lambert-shaded moon sphere from the LRO texture for the current elongation (soft terminator, earthshine, limb darkening).
@@ -370,21 +391,66 @@ struct FaceView: View {
     }
 }
 
-/// Wrist motion (CoreMotion gravity, 30 Hz, low-pass filtered) for the digits' rim light and parallax.
-final class Motion: ObservableObject {
-    @Published var tilt: CGPoint = .zero
+/// Wrist motion for the digits' moving light and parallax. Plain reference model (not @Published): the TimelineView
+/// reads it every frame, so no SwiftUI state is written from the sensor callback or the draw path.
+/// deviceMotion gravity when available, raw accelerometer otherwise; low-pass filtered.
+final class Motion {
+    private(set) var tilt: CGPoint = .zero
     private let mm = CMMotionManager()
+    private(set) var source = "none"
     func start() {
-        guard mm.isDeviceMotionAvailable, !mm.isDeviceMotionActive else { return }
-        mm.deviceMotionUpdateInterval = 1.0 / 30
-        mm.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in
-            guard let self, let gr = m?.gravity else { return }
-            let k = 0.12, x = max(-1, min(1, gr.x)), y = max(-1, min(1, gr.y))
-            let n = CGPoint(x: self.tilt.x + (x - self.tilt.x) * k, y: self.tilt.y + (y - self.tilt.y) * k)
-            if abs(n.x - self.tilt.x) + abs(n.y - self.tilt.y) > 0.002 { self.tilt = n }
+        #if targetEnvironment(simulator)
+        source = "simulator"; return
+        #else
+        let k = 0.15
+        let feed: (Double, Double) -> Void = { [weak self] x, y in
+            guard let self else { return }
+            let x = max(-1, min(1, x)), y = max(-1, min(1, y))
+            self.tilt = CGPoint(x: self.tilt.x + (x - self.tilt.x) * k, y: self.tilt.y + (y - self.tilt.y) * k) }
+        if mm.isDeviceMotionAvailable {
+            guard !mm.isDeviceMotionActive else { return }
+            source = "deviceMotion"; mm.deviceMotionUpdateInterval = 1.0 / 30
+            mm.startDeviceMotionUpdates(to: .main) { m, _ in if let gr = m?.gravity { feed(gr.x, gr.y) } }
+        } else if mm.isAccelerometerAvailable {
+            guard !mm.isAccelerometerActive else { return }
+            source = "accelerometer"; mm.accelerometerUpdateInterval = 1.0 / 30
+            mm.startAccelerometerUpdates(to: .main) { a, _ in if let a = a?.acceleration { feed(a.x, a.y) } }
         }
+        print("EnochWatch motion source:", source)
+        #endif
     }
-    func stop() { mm.stopDeviceMotionUpdates() }
+    /// Current tilt, -1...1. Simulator: "-fakeTilt x,y" pins it, otherwise a slow sine so the effect is visible.
+    func read(_ date: Date) -> CGPoint {
+        #if targetEnvironment(simulator)
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-fakeTilt"), i + 1 < a.count {
+            let v = a[i + 1].split(separator: ",").compactMap { Double($0) }
+            if v.count == 2 { return CGPoint(x: v[0], y: v[1]) } }
+        let t = date.timeIntervalSinceReferenceDate
+        return CGPoint(x: 0.6 * sin(t * 0.9), y: 0.5 * cos(t * 0.7))
+        #else
+        return tilt
+        #endif
+    }
+    func stop() { mm.stopDeviceMotionUpdates(); mm.stopAccelerometerUpdates() }
+}
+
+/// Critically-tuned spring (response 0.35 s, damping 0.65: a small visible overshoot), integrated per frame.
+final class ZoomSpring {
+    private(set) var x: Double = 1
+    private var v: Double = 0, t: Double = 1, last: Date? = nil
+    var moving: Bool { abs(v) > 0.002 || abs(x - t) > 0.001 }
+    func reset(_ z: Double) { x = z; t = z; v = 0; last = nil }
+    @discardableResult func step(to target: Double, at now: Date) -> Double {
+        t = target
+        var dt = last.map { now.timeIntervalSince($0) } ?? 0; last = now
+        dt = min(max(dt, 0), 0.1)
+        let w = 2 * Double.pi / 0.35, z = 0.65, n = max(1, Int(ceil(dt / (1.0 / 240))))
+        let h = dt / Double(n)
+        for _ in 0..<n { v += (-w * w * (x - t) - 2 * z * w * v) * h; x += v * h }
+        if !moving { x = t; v = 0 }
+        return x
+    }
 }
 
 @main struct EnochWatchApp: App { var body: some Scene { WindowGroup { FaceView().ignoresSafeArea() } } }
@@ -436,14 +502,22 @@ struct GlassTime: View {
                 } else {
                     shape.fill(.ultraThinMaterial.opacity(0.5))
                 }
-                // the light source follows the wrist: tilting moves the bright edge around the glyphs
-                let lx = min(1, max(0, 0.1 - Double(tilt.x) * 0.9)), ly = min(1, max(0, 0.1 + Double(tilt.y) * 0.9))
-                shape.stroke(LinearGradient(colors: [.white.opacity(0.95), .white.opacity(0.35), .white.opacity(0.6)],
-                                            startPoint: UnitPoint(x: lx, y: ly), endPoint: UnitPoint(x: 1 - lx, y: 1 - ly)), lineWidth: 1)
+                // light follows the wrist. Drawn on top of the glass, because the system glass rim does not react to custom light:
+                // a bright rim stroke whose hot spot rotates around the glyphs with tilt, and a soft specular sheen sweeping across.
+                let ang = atan2(Double(tilt.y) + 0.35, -Double(tilt.x) - 0.35), mag = min(1, 0.45 + hypot(tilt.x, tilt.y))
+                let hot = UnitPoint(x: 0.5 + 0.5 * cos(ang), y: 0.5 - 0.5 * sin(ang)), cold = UnitPoint(x: 1 - hot.x, y: 1 - hot.y)
+                shape.stroke(LinearGradient(colors: [.white.opacity(0.95 * mag + 0.05), .white.opacity(0.18), .white.opacity(0.45)],
+                                            startPoint: hot, endPoint: cold), lineWidth: 1.4)
+                let sweep = 0.5 + Double(tilt.x) * 0.55 - Double(tilt.y) * 0.25
+                shape.fill(LinearGradient(stops: [.init(color: .clear, location: max(0, sweep - 0.22)),
+                                                  .init(color: .white.opacity(0.32), location: min(1, max(0, sweep))),
+                                                  .init(color: .clear, location: min(1, sweep + 0.22))],
+                                          startPoint: UnitPoint(x: 0, y: 0.15), endPoint: UnitPoint(x: 1, y: 0.85)))
+                    .blendMode(.plusLighter)
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            // parallax: digits float a few points above the map
-            .offset(x: tilt.x * 3.5, y: -tilt.y * 3.5)
+            // parallax: digits float above the map, up to 6 pt
+            .offset(x: tilt.x * 6, y: -tilt.y * 6)
         }
         .allowsHitTesting(false)
     }
