@@ -125,12 +125,16 @@ function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
   a.setTransform(dpr,0,0,dpr,0,0);a.fillStyle='rgba(255,255,255,.08)';a.fillRect(0,0,W,H);mask(a);
  }
  // thin crisp rim (~1.2 px inside the glyph), redrawn every frame: the light direction follows device tilt / pointer
- var lx=Math.min(1,Math.max(0,.1-TL.x*.9)),ly=Math.min(1,Math.max(0,.1+TL.y*.9)),gx0=CX-FS*.6,gy0=CY-OY-FS*.5,gw=FS*1.2,gh=OY*2+FS;
+ var ang=Math.atan2(TL.y+.35,-TL.x-.35),mag=Math.min(1,.45+Math.hypot(TL.x,TL.y)),lx=.5+.5*Math.cos(ang),ly=.5-.5*Math.sin(ang),gx0=CX-FS*.6,gy0=CY-OY-FS*.5,gw=FS*1.2,gh=OY*2+FS;
  b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.lineJoin='round';b.lineWidth=2.4;
- var gr=b.createLinearGradient(gx0+gw*lx,gy0+gh*ly,gx0+gw*(1-lx),gy0+gh*(1-ly));gr.addColorStop(0,'rgba(255,255,255,.95)');gr.addColorStop(.5,'rgba(255,255,255,.4)');gr.addColorStop(1,'rgba(255,255,255,.6)');
- b.strokeStyle=gr;each(b,0,0,b.strokeText);mask(b);
- // parallax: the glass digits float a few points above the map
- var px=TL.x*7,py=-TL.y*7;g.drawImage(gl1,px,py,W,H);g.drawImage(gl2,px,py,W,H);}
+ var gr=b.createLinearGradient(gx0+gw*lx,gy0+gh*ly,gx0+gw*(1-lx),gy0+gh*(1-ly));gr.addColorStop(0,'rgba(255,255,255,'+(.05+.95*mag).toFixed(3)+')');gr.addColorStop(.5,'rgba(255,255,255,.18)');gr.addColorStop(1,'rgba(255,255,255,.6)');
+ b.strokeStyle=gr;each(b,0,0,b.strokeText);
+ // soft specular sheen sweeping across the glass with tilt
+ var sw=.5+TL.x*.55-TL.y*.25,sg=b.createLinearGradient(gx0,gy0+gh*.15,gx0+gw,gy0+gh*.85);
+ sg.addColorStop(Math.max(0,Math.min(1,sw-.22)),'rgba(255,255,255,0)');sg.addColorStop(Math.max(0,Math.min(1,sw)),'rgba(255,255,255,.3)');sg.addColorStop(Math.max(0,Math.min(1,sw+.22)),'rgba(255,255,255,0)');
+ b.globalCompositeOperation='lighter';b.fillStyle=sg;each(b,0,0,b.fillText);b.globalCompositeOperation='source-over';mask(b);
+ // parallax: the glass digits float above the map (about 6 watch points at this scale)
+ var px=TL.x*12,py=-TL.y*12;g.drawImage(gl1,px,py,W,H);g.drawImage(gl2,px,py,W,H);}
 // tilt: DeviceOrientation (iOS asks permission on first tap), pointer position on desktop; low-pass filtered, -1..1
 var TL={x:0,y:0},TT={x:0,y:0};
 function onOri(e){if(e.gamma==null)return;TT.x=Math.max(-1,Math.min(1,e.gamma/45));TT.y=Math.max(-1,Math.min(1,-(e.beta-40)/45));}
@@ -154,8 +158,7 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
   var lx=litCv.getContext('2d');lx.globalCompositeOperation='source-over';lx.clearRect(0,0,512,512);lx.drawImage(discDay,0,0,512,512);
   lx.globalCompositeOperation='destination-in';lx.imageSmoothingEnabled=true;lx.drawImage(nightCv,0,0,512,512);
   g.drawImage(litCv,CX-R,CY-R,2*R,2*R);}
- drawBorders();
- // the firmament dome from above: clear at the crown, pale blue sheen toward the rim
+  // the firmament dome from above: clear at the crown, pale blue sheen toward the rim
  var dm=g.createRadialGradient(CX,CY,0,CX,CY,R*1.03);dm.addColorStop(0,'rgba(190,240,210,.03)');dm.addColorStop(.75,'rgba(190,240,210,.07)');dm.addColorStop(1,'rgba(200,235,215,.32)');
  g.fillStyle=dm;g.fillRect(CX-R,CY-R,2*R,2*R);
  g.restore();
@@ -169,8 +172,10 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  for(var k=0;k<36;k++){var a=k*10*D,l=k%3?3:7,sx=Math.sin(a),cy_=Math.cos(a);g.lineWidth=k%3?.8:1.2;
   g.beginPath();g.moveTo(CX+(R-l)*sx,CY+(R-l)*cy_);g.lineTo(CX+R*sx,CY+R*cy_);g.stroke();
   if(k%3===0&&k!==9&&k!==27&&R<H/2-14){var lo=k*10>180?k*10-360:k*10;g.fillText(Math.abs(lo).toString().padStart(3,'0')+(lo>0&&lo<180?'E':lo<0?'W':''),CX+(R+9)*sx,CY+(R+9)*cy_);}}
- // time digits (flat Liquid Glass lens): over map, day/night, borders and grid; under stars, sun, moon and tags
+ // time digits (flat Liquid Glass lens): over map, day/night and grid; under country/city outlines, stars, sun, moon and tags
  var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');glassTime(hh,mm);
+ // current country and city outlines over the glass digits
+ g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();drawBorders();g.restore();
  g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();
  // stars inside the firmament, turning around the pole with sidereal time; faint by day, bright at night
  var rot=S.gst*D;
@@ -237,38 +242,24 @@ function chip(x,y,al,top,big,fs){fs=fs||16;g.save();g.textAlign=al;g.textBaselin
  g.stroke();g.restore();return x0;}
 // HUD icons: original flat line/solid glyphs (tactical-HUD inspired, no game assets), ~20 px, mint with amber accent
 function poly(c,pts,close){c.beginPath();c.moveTo(pts[0][0],pts[0][1]);for(var i=1;i<pts.length;i++)c.lineTo(pts[i][0],pts[i][1]);if(close)c.closePath();}
-// icons: Lucide (ISC licence, see LICENSE-lucide.txt), 24-unit strokes drawn centred; all orange like the borders
-var OR='#ff8c1a',LU={rect:'M4 6h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z',
- sunrise:'M12 2v8M4.93 10.93l1.41 1.41M2 18h2M20 18h2M19.07 10.93l-1.41 1.41M22 22H2M8 6l4-4 4 4M16 18a4 4 0 0 0-8 0',
- sunset:'M12 10V2M4.93 10.93l1.41 1.41M2 18h2M20 18h2M19.07 10.93l-1.41 1.41M22 22H2M16 6l-4 4-4-4M16 18a4 4 0 0 0-8 0',
- heart:'M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5',
- droplet:'M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z',
- charging:'M11 7l-3 5h4l-3 5M14.856 6H16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.935M22 14v-4M5.14 18H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2.936'};
-function lu(c,d,col){c.save();c.scale(.95,.95);c.translate(-12,-12);c.strokeStyle=col||OR;c.lineWidth=2;c.lineCap='round';c.lineJoin='round';d.forEach(function(p){c.stroke(new Path2D(p));});c.restore();}
-var ICON={sun:function(c,up){lu(c,[up?LU.sunrise:LU.sunset]);},
- heart:function(c){lu(c,[LU.heart]);},
- rain:function(c){lu(c,[LU.droplet]);},
- bat:function(c,lv,chg){var col=lv!=null&&lv<.2?ALR:OR;if(chg){lu(c,[LU.charging],col);return;}
-  var n=lv==null?0:Math.ceil(lv*3),bars=['M6 10v4','M10 10v4','M14 10v4'].slice(0,n);lu(c,[LU.rect,'M22 14v-4'].concat(bars),col);}};
-// curved corner complication: icon + value laid along an arc band concentric with the disc, just along its rim.
-// deg = chip centre angle from the screen centre (0 = right, 90 = down); icon on the outer side
-function ichip(deg,al,icon,args,val,vcol){g.save();g.font='800 15px '+MONO;
- var rm=R0+15,hb=14,t0=deg*D,top=Math.sin(t0)<0,dir=top?1:-1,ws=val.split('').map(function(ch){return g.measureText(ch).width;});
- var iconL=26,gap=6,pad=10,tl=ws.reduce(function(p,q){return p+q;},0),tot=pad+iconL+gap+tl+pad,span=tot/rm,s0=t0-dir*span/2,p=pad;
- function place(len,fn){var t=s0+dir*len/rm;g.save();g.translate(CX+rm*Math.cos(t),CY+rm*Math.sin(t));g.rotate(t+dir*Math.PI/2);fn();g.restore();}
- function txt(){ws.forEach(function(w,k){place(p+w/2,function(){g.textAlign='center';g.textBaseline='middle';g.fillStyle='#fff';g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=4;g.fillText(val[k],0,1);});p+=w;});}
- function ic(){place(p+iconL/2,function(){g.lineWidth=1.6;g.lineJoin='miter';ICON[icon].apply(null,[g].concat(args));});p+=iconL;}
- if(al==='left'){ic();p+=gap;txt();}else{txt();p+=gap;ic();}
- g.restore();}
+// text laid along a circle around the screen centre at angle deg (0 = right, 90 = down), upright on both halves
+function arcText(t,font,col,deg,r,track){g.save();g.font=font;track=track||0;var t0=deg*D,dir=Math.sin(t0)<0?1:-1,
+ ws=t.split('').map(function(ch){return g.measureText(ch).width+track;}),tot=ws.reduce(function(p,q){return p+q;},0),a=t0-dir*tot/r/2;
+ g.textAlign='center';g.textBaseline='middle';g.fillStyle=col;g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=4;
+ ws.forEach(function(w,k){var m=a+dir*w/2/r;g.save();g.translate(CX+r*Math.cos(m),CY+r*Math.sin(m));g.rotate(m+dir*Math.PI/2);g.fillText(t[k],0,0);g.restore();a+=dir*w/r;});g.restore();}
+// curved corner complication: small orange label stacked over a bigger white value along the rim (no icon, no frame);
+// "on top" is outward on the upper rim and inward on the lower rim. Value colour carries the alert state.
+function ichip(deg,label,val,vcol){var top=Math.sin(deg*D)<0,rl=top?R0+29:R0+6,rv=top?R0+11:R0+24;
+ arcText(label,'800 11px '+MONO,'#ff8c1a',deg,rl,1);arcText(val,'800 21px '+MONO,vcol||'#fff',deg,rv);}
 function corners(now,S){getWx();var se=sunEvent(now,S);
- // top-left: next sunrise (chevron up) or sunset (chevron down) at your position
- ichip(-126,'left','sun',[se[1]!=='SET'],se[0]);
+ // top-left: next sunrise or sunset at your position
+ ichip(-126,se[1]==='SET'?'SUNSET':'SUNRISE',se[0]);
  // top-right: heart rate. Browsers cannot read heart rate, so no value is shown (watch reads HealthKit)
- ichip(-54,'right','heart',[],'--');
+ ichip(-54,'BPM','--');
  // bottom-left: chance of rain this hour (amber when the reading is older than 20 min)
- var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;ichip(126,'left','rain',[],wx.p==null?'--':wx.p+'%',age>20?AMB:null);
+ var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;ichip(126,'RAIN',wx.p==null?'--':wx.p+'%',age>20?AMB:null);
  // bottom-right: device battery (Battery API where the browser has it)
- ichip(54,'right','bat',[batt?batt.level:null,batt&&batt.charging],batt?Math.round(batt.level*100)+'%':'--',batt&&batt.level<.2?ALR:null);
+ ichip(54,'BATTERY',batt?Math.round(batt.level*100)+'%':'--',batt&&batt.level<.2?ALR:null);
  // top: live place name, then local date; bottom: coordinates
  getPlace();var cd='';if(se[2]){var m=Math.max(0,Math.round((se[2]-now.getTime())/6e4));cd=' \u00b7 SUN'+(se[1]==='RISE'?'RISE':'SET')+' IN '+Math.floor(m/60)+'H'+String(m%60).padStart(2,'0');}
  g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';
@@ -277,20 +268,22 @@ function corners(now,S){getWx();var se=sunEvent(now,S);
  g.font='800 9px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('default')===0?' FALLBACK':''),CX,H-11);g.restore();}
 var QP=new URLSearchParams(location.search);if(QP.get('lat')&&QP.get('lon'))pos={lat:+QP.get('lat'),lon:+QP.get('lon'),src:'test override'};
 if(navigator.geolocation&&!QP.get('lat'))navigator.geolocation.watchPosition(function(r){var mv=Math.hypot(r.coords.latitude-pos.lat,r.coords.longitude-pos.lon)>.05;pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS \u00b1'+Math.round(r.coords.accuracy)+' m'};if(mv)wx.at=0;},function(){},{enableHighAccuracy:false,maximumAge:6e4,timeout:2e4});
-// spring zoom (response .35 s, damping .85): input sets the target zt, the displayed zoom follows with ease in/out and a soft settle
-var zt=zoom,zv=0,zl=0,zRun=false;
-function setZoom(z){zt=Math.min(ZF,Math.max(1,z));localStorage.setItem('enochZoom',zt);if(!zRun){zRun=true;zl=performance.now();requestAnimationFrame(zStep);}}
+// spring zoom (response .35 s, damping .65: small visible overshoot): input sets the target zt, the displayed zoom follows with ease in/out and a soft settle
+var zt=zoom,zr=zoom,zv=0,zl=0,zRun=false,zIdle=0;
+// input past either limit rubber-bands (40%) and springs back to the limit once input stops
+function setZoom(z,band){if(band){zr=Math.min(ZF+.8,Math.max(.6,z));zt=zr<1?1-(1-zr)*.4:zr>ZF?ZF+(zr-ZF)*.4:zr;}else zr=zt=Math.min(ZF,Math.max(1,z));localStorage.setItem('enochZoom',Math.min(ZF,Math.max(1,zt)));
+ clearTimeout(zIdle);if(zt<1||zt>ZF)zIdle=setTimeout(function(){setZoom(zt);},220);if(!zRun){zRun=true;zl=performance.now();requestAnimationFrame(zStep);}}
 function zStep(n){var dt=Math.min(.05,(n-zl)/1000),w=2*Math.PI/.35,h=1/240;zl=n;
- while(dt>0){var s=Math.min(h,dt);zv+=(-w*w*(zoom-zt)-2*.85*w*zv)*s;zoom+=zv*s;dt-=s;}
+ while(dt>0){var s=Math.min(h,dt);zv+=(-w*w*(zoom-zt)-2*.65*w*zv)*s;zoom+=zv*s;dt-=s;}
  if(Math.abs(zoom-zt)<5e-4&&Math.abs(zv)<1e-3){zoom=zt;zv=0;zRun=false;}draw();if(zRun)requestAnimationFrame(zStep);}
 function toggle(){setZoom(zt<(1+ZF)/2?ZF:1);}
 var pinch=null,lastTap=0;
-cv.addEventListener('touchstart',function(e){if(e.touches.length===2){var a=e.touches[0],b=e.touches[1];pinch={d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),z:zt};e.preventDefault();}
+cv.addEventListener('touchstart',function(e){if(e.touches.length===2){var a=e.touches[0],b=e.touches[1];pinch={d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),z:zr};e.preventDefault();}
  else if(e.touches.length===1){var t=Date.now();if(t-lastTap<300){toggle();e.preventDefault();lastTap=0;}else lastTap=t;}},{passive:false});
-cv.addEventListener('touchmove',function(e){if(pinch&&e.touches.length===2){var a=e.touches[0],b=e.touches[1];setZoom(pinch.z*Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)/pinch.d);}e.preventDefault();},{passive:false});
+cv.addEventListener('touchmove',function(e){if(pinch&&e.touches.length===2){var a=e.touches[0],b=e.touches[1];setZoom(pinch.z*Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)/pinch.d,true);}e.preventDefault();},{passive:false});
 cv.addEventListener('touchend',function(e){if(e.touches.length<2)pinch=null;});
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
-cv.addEventListener('wheel',function(e){e.preventDefault();setZoom(zt*Math.exp(-e.deltaY*(e.ctrlKey?.01:.002)));},{passive:false});
+cv.addEventListener('wheel',function(e){e.preventDefault();setZoom(zr*Math.exp(-e.deltaY*(e.ctrlKey?.01:.002)),true);},{passive:false});
 cv.addEventListener('dblclick',function(e){e.preventDefault();toggle();});
 Promise.all([document.fonts.load("800 20px 'JBM'"),document.fonts.load("italic 700 20px 'CPB'")]).then(draw,draw);draw();setInterval(draw,100);
 // tilt filter at ~30 Hz (redraws ride the 10 Hz loop, plus here when the light is moving)
