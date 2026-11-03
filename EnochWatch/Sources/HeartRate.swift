@@ -5,7 +5,8 @@ import HealthKit
 final class HeartRate: ObservableObject {
     @Published var bpm: Int? = nil
     @Published var at: Date? = nil
-    @Published var lo: Int? = nil, hi: Int? = nil   // last-hour min / max
+    @Published var lo: Int? = nil   // last-hour min
+    @Published var hi: Int? = nil   // last-hour max
     private var pts: [(Date, Double)] = []
     private let store = HKHealthStore()
     private var query: HKAnchoredObjectQuery?
