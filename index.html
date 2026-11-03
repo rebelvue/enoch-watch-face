@@ -26,7 +26,7 @@ function gradeDisc(){if(discDay)return true;if(!disc.complete||!disc.naturalWidt
   else{x.globalCompositeOperation='source-atop';x.globalAlpha=1-gain;x.fillStyle=tint||'#000';x.fillRect(0,0,1024,1024);}
   x.globalAlpha=1;x.globalCompositeOperation='source-over';return c;}
  discDay=mk(1.55); // sunlit: original map, exposure raised, natural colours
- discNight=mk(.22,'rgb(8,14,32)'); // night (active): deep navy at 0.78, lands faintly visible
+ discNight=mk(.10,'rgb(8,14,32)'); // night (active): deep navy at 0.90, lands faintly visible
  discNightAod=mk(.1); // night (always-on): ~10%, unchanged
  return true;}
 var disc=new Image();disc.src='disc.webp';disc.onload=draw;
