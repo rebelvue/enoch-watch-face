@@ -195,12 +195,12 @@ struct FaceView: View {
     private func tap(_ p: CGPoint) {
         if detail != nil { detail = nil; return }
         let b = WKInterfaceDevice.current().screenBounds.size, dx = p.x - b.width / 2, dy = p.y - b.height / 2
-        guard hypot(dx, dy) > (min(b.width, b.height) / 2 - 4) * 0.6 else { return }
-        let a = atan2(dy, dx) * 180 / .pi
-        func dist(_ x: Double) -> Double { abs((x - a + 540).truncatingRemainder(dividingBy: 360) - 180) }
+        // hit-test only the comps' actual rendered curved text bands (+6 pt), never quadrants or empty space
+        let r = hypot(dx, dy), a = atan2(dy, dx) * 180 / .pi
+        func dist(_ x: Double) -> Double { abs((x - a + 540).truncatingRemainder(dividingBy: 360) - 180) * .pi / 180 }
         let opts: [(Double, Comp)] = [(-126, .sun), (-54, .bpm), (126, .rain), (54, .battery)]
-        if let m = opts.min(by: { dist($0.0) < dist($1.0) }), dist(m.0) < 40 {
-            detail = m.1; detailAt = Date(); WKInterfaceDevice.current().play(.click) }
+        for (deg, c) in opts { guard let h = CompHits.bands[deg] else { continue }
+            if r >= h.0 && r <= h.1 && dist(deg) <= h.2 { detail = c; detailAt = Date(); WKInterfaceDevice.current().play(.click); return } }
     }
 
     /// Detail card: clear Liquid Glass rounded rect (no frost, no shadow), orange labels, white values.
@@ -451,7 +451,7 @@ struct FaceView: View {
     static let orange = Color(red: 1, green: 140.0 / 255, blue: 26.0 / 255)
     /// Text laid along a circle of radius r around the screen centre, centred on angle `deg` (0 = right, 90 = down),
     /// always reading left to right and upright (top half: glyph tops point outward; bottom half: inward).
-    private func arcText(_ g: inout GraphicsContext, _ size: CGSize, _ s: String, _ font: Font, _ col: Color, deg: Double, r: Double, track: Double = 0) {
+    @discardableResult private func arcText(_ g: inout GraphicsContext, _ size: CGSize, _ s: String, _ font: Font, _ col: Color, deg: Double, r: Double, track: Double = 0) -> Double {
         let c = CGPoint(x: size.width / 2, y: size.height / 2), top = sin(deg * .pi / 180) < 0, dir = top ? 1.0 : -1.0
         let glyphs = s.map { g.resolve(Text(String($0)).font(font).foregroundColor(col)) }
         let gw = glyphs.map { $0.measure(in: CGSize(width: 40, height: 40)).width + track }
@@ -460,6 +460,7 @@ struct FaceView: View {
             let a = pos + dir * gw[k] / 2 / r; var l = g
             l.translateBy(x: c.x + r * cos(a), y: c.y + r * sin(a)); l.rotate(by: .radians(a + dir * .pi / 2))
             l.draw(t, at: .zero, anchor: .center); pos += dir * gw[k] / r }
+        return gw.reduce(0, +) / r // angular width (radians), used for tap hit-testing
     }
     /// Curved complication: small orange label stacked over a bigger white value, both following the rim (no icon, no frame).
     /// Value colour carries the alert state.
@@ -467,8 +468,11 @@ struct FaceView: View {
         let R0 = min(size.width, size.height) / 2 - 4, top = sin(deg * .pi / 180) < 0
         // "on top" = outward on the upper rim, inward on the lower rim (glyphs are upright on both)
         let rl = top ? R0 + 16 : R0 + 1, rv = top ? R0 + 4 : R0 + 12
-        arcText(&g, size, label, .system(size: 7.5, weight: .heavy, design: .monospaced), FaceView.orange, deg: deg, r: rl, track: 0.6)
-        arcText(&g, size, val, .system(size: 14, weight: .heavy, design: .monospaced), vcol, deg: deg, r: rv)
+        let wl = arcText(&g, size, label, .system(size: 7.5, weight: .heavy, design: .monospaced), FaceView.orange, deg: deg, r: rl, track: 0.6)
+        let wv = arcText(&g, size, val, .system(size: 14, weight: .heavy, design: .monospaced), vcol, deg: deg, r: rv)
+        // record the rendered curved band (label + value) with ~6 pt padding; taps outside every band do nothing
+        let pad = 6.0, rIn = min(rl - 4.5, rv - 8.5) - pad, rOut = max(rl + 4.5, rv + 8.5) + pad
+        CompHits.bands[deg] = (rIn, rOut, max(wl, wv) / 2 + pad / ((rIn + rOut) / 2))
     }
 
     private func corners(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ sky: Sky) {
@@ -686,3 +690,6 @@ struct GlassTime: View {
 extension View {
     @ViewBuilder func aodGrey(_ on: Bool) -> some View { if on { self.saturation(0) } else { self } }
 }
+
+/// Rendered comp text bands keyed by rim angle: (inner radius, outer radius, half angular width in radians). Written while drawing.
+enum CompHits { static var bands: [Double: (Double, Double, Double)] = [:] }

@@ -274,11 +274,14 @@ function poly(c,pts,close){c.beginPath();c.moveTo(pts[0][0],pts[0][1]);for(var i
 function arcText(t,font,col,deg,r,track){g.save();g.font=font;track=track||0;var t0=deg*D,dir=Math.sin(t0)<0?1:-1,
  ws=t.split('').map(function(ch){return g.measureText(ch).width+track;}),tot=ws.reduce(function(p,q){return p+q;},0),a=t0-dir*tot/r/2;
  g.textAlign='center';g.textBaseline='middle';g.fillStyle=col;g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=4;
- ws.forEach(function(w,k){var m=a+dir*w/2/r;g.save();g.translate(CX+r*Math.cos(m),CY+r*Math.sin(m));g.rotate(m+dir*Math.PI/2);g.fillText(t[k],0,0);g.restore();a+=dir*w/r;});g.restore();}
+ ws.forEach(function(w,k){var m=a+dir*w/2/r;g.save();g.translate(CX+r*Math.cos(m),CY+r*Math.sin(m));g.rotate(m+dir*Math.PI/2);g.fillText(t[k],0,0);g.restore();a+=dir*w/r;});g.restore();return tot/r;}
 // curved corner complication: small orange label stacked over a bigger white value along the rim (no icon, no frame);
 // "on top" is outward on the upper rim and inward on the lower rim. Value colour carries the alert state.
 function ichip(deg,label,val,vcol){var top=Math.sin(deg*D)<0,rl=top?R0+29:R0+6,rv=top?R0+11:R0+24;
- arcText(label,'800 11px '+MONO,AMB,deg,rl,1);arcText(val,'800 21px '+MONO,vcol||'#fff',deg,rv);}
+ var wl=arcText(label,'800 11px '+MONO,AMB,deg,rl,1),wv=arcText(val,'800 21px '+MONO,vcol||'#fff',deg,rv);
+ // rendered curved band (label + value) with ~9 px (6 watch pt) padding; clicks outside every band do nothing
+ var pad=9,ri=Math.min(rl-7,rv-12)-pad,ro=Math.max(rl+7,rv+12)+pad;HB[deg]=[ri,ro,Math.max(wl,wv)/2+pad/((ri+ro)/2)];}
+var HB={};
 function corners(now,S){getWx();var se=sunEvent(now,S);
  // top-left: next sunrise or sunset at your position
  ichip(-126,se[1]==='SET'?'SUNSET':'SUNRISE',se[0]);
@@ -310,8 +313,9 @@ function toggle(){setZoom(zt<(1+ZF)/2?ZF:1);}
 // zoom is tap only: double click / double tap toggles with the spring; single click on a comp opens its detail card
 var clk=0,clkT=0;
 function hit(e){var r=cv.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W-CX,y=(e.clientY-r.top)/r.height*H-CY;
- if(Math.hypot(x,y)<R0*.6)return null;var a=Math.atan2(y,x)/D,best=null,bd=40;
- [[-126,'sun'],[-54,'bpm'],[126,'rain'],[54,'battery']].forEach(function(o){var d=Math.abs(((o[0]-a)%360+540)%360-180);if(d<bd){bd=d;best=o[1];}});return best;}
+ // only the comps' actual rendered curved text bands count, never quadrants or empty space
+ var rr=Math.hypot(x,y),a=Math.atan2(y,x)/D,best=null;
+ [[-126,'sun'],[-54,'bpm'],[126,'rain'],[54,'battery']].forEach(function(o){var h=HB[o[0]];if(!h)return;var d=Math.abs(((o[0]-a)%360+540)%360-180)*D;if(rr>=h[0]&&rr<=h[1]&&d<=h[2])best=o[1];});return best;}
 cv.addEventListener('click',function(e){var t=Date.now();clearTimeout(clkT);
  if(t-clk<300){clk=0;DET=null;toggle();return;}clk=t;var ev={clientX:e.clientX,clientY:e.clientY};
  clkT=setTimeout(function(){if(DET){DET=null;}else{var k=hit(ev);if(k){DET=k;detAt=Date.now();}}draw();},300);});
