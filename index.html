@@ -187,9 +187,9 @@ function draw(){var now=new Date(Date.now()+TOFF+SCS),S=sky(now.getTime());R=R0*
  // time digits (flat Liquid Glass lens): over map, day/night and grid; under country/city outlines, stars, sun, moon and tags
  var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');glassTime(hh,mm);
  // current country and city outlines over the glass digits
- // layered parallax (map, shading and grid stay fixed): digits 22, outlines 12, sky 8, comps and text 6 px
+ // layered parallax (map, shading, grid, stars, sun and moon stay fixed): digits 22, outlines 12, comps and text 6 px
  g.save();PX(12);if(AOD)g.globalAlpha=.7;g.beginPath();g.arc(CX,CY,R,0,7);g.clip();drawBorders();g.restore();
- g.save();PX(8);if(AOD)g.globalAlpha=.45;g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();
+ g.save();if(AOD)g.globalAlpha=.45;g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();
  // stars inside the firmament, turning around the pole with sidereal time; faint by day, bright at night
  var rot=S.gst*D;
  // real bright stars (HYG, mag<4.5): over the ground point at lat=Dec, lon=RA-GST, like the sun and moon

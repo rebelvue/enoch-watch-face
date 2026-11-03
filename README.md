@@ -66,7 +66,7 @@ These are the same low-precision formulas the main map uses, accurate to about 0
 - Tap a comp to open a clear glass card. RAIN shows the next 6 h as bars (Open-Meteo), BATTERY shows level and charging, BPM shows now plus last-hour min and max (watch only), and SUN shows sunrise, sunset and day length. Tap, turn the crown, or wait 6 s to close it.
 
 ## Parallax
-- Tilt moves only the overlays, in layers: digits most, then outlines, sky and comps. The map, shading and grid stay fixed. It runs at 60 Hz through a critically damped spring and is off in always-on.
+- Tilt moves only the time digits (about 11 pt, with their rim light and sheen), the country/city outlines (about 6 pt) and the comps, date and location text (about 3 pt). The earth map, grid, day/night shading, stars, sun and moon (including its dark side) never move with parallax. It runs at 60 Hz through a critically damped spring and is off in always-on.
 
 ## Stars
 - All white, about 1 pt, the same size. No galaxies.

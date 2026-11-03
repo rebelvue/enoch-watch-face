@@ -170,7 +170,7 @@ struct FaceView: View {
 
     private static func px(_ t: CGPoint, _ k: Double) -> CGSize { CGSize(width: t.x * k, height: -t.y * k) }
 
-    /// One frame. Map, grid and day/night stay fixed; overlays float at different depths with wrist tilt
+    /// One frame. Map, grid, day/night shading, stars, sun and moon stay fixed; only digits, outlines and text float with wrist tilt
     /// (digits 11 pt, outlines 6 pt, sky 4 pt, comps and text 3 pt). AOD: no motion, no scrub.
     @ViewBuilder private func face(_ now: Date) -> some View {
         let tilt = aod ? CGPoint.zero : motion.read(now)
@@ -183,7 +183,7 @@ struct FaceView: View {
             Canvas { g, size in draw(&g, size, date, 0) }.aodGrey(aod)
             GlassTime(date: date, tilt: tilt, aod: aod).offset(Self.px(tilt, 11)).aodGrey(aod).zIndex(1)
             Canvas { g, size in draw(&g, size, date, 3) }.offset(Self.px(tilt, 6)).aodGrey(aod).zIndex(2).allowsHitTesting(false)
-            Canvas { g, size in draw(&g, size, date, 1) }.offset(Self.px(tilt, 4)).aodGrey(aod).zIndex(3).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 1) }.aodGrey(aod).zIndex(3).allowsHitTesting(false)
             if aod { Canvas { g, size in draw(&g, size, date, 5) }.zIndex(3.5).allowsHitTesting(false) }
             Canvas { g, size in draw(&g, size, date, 2, off) }.offset(Self.px(tilt, 3)).aodGrey(aod).zIndex(4).allowsHitTesting(false)
             if let k = detail { card(k, date).zIndex(5) }
