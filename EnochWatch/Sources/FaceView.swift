@@ -284,7 +284,7 @@ struct FaceView: View {
             // night side: solar elevation on the globe, sampled on a coarse grid
             // smooth shading: per-cell values go into two small bitmaps that are drawn scaled up with
             // interpolation, so there are no cell squares or seams (filled cells used to overlap into a visible grid)
-            if let sh = Self.shade(n: 64, sunLat: sky.sunLat * d, sunLon: sky.sunLon * d, nightMax: aod ? 0.93 : 0.5) {
+            if let sh = Self.shade(n: 64, sunLat: sky.sunLat * d, sunLon: sky.sunLon * d, nightMax: aod ? 0.93 : 0.78) {
                 l.draw(Image(decorative: sh.0, scale: 1).interpolation(.high), in: disc)
                 l.blendMode = .screen; l.draw(Image(decorative: sh.1, scale: 1).interpolation(.high), in: disc); l.blendMode = .normal
             }
@@ -424,7 +424,9 @@ struct FaceView: View {
             let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
             var t = min(1, max(0, (e + 0.309) / 0.517)); t = t * t * (3 - 2 * t)
             let k = (j * n + i) * 4
-            night[k + 3] = UInt8(255 * nightMax * (1 - t))               // premultiplied black; active 0.5 (lands readable), always-on 0.93
+            // night: deep navy (8, 14, 32), premultiplied; active 0.78 (lands faintly visible), always-on 0.93
+            let na = 255 * nightMax * (1 - t)
+            night[k] = UInt8(na * 8 / 255); night[k + 1] = UInt8(na * 14 / 255); night[k + 2] = UInt8(na * 32 / 255); night[k + 3] = UInt8(na)
             let a = 255 * t, v = UInt8(a * 0.12); day[k] = v; day[k + 1] = v; day[k + 2] = v; day[k + 3] = UInt8(a)
         } }
         func img(_ px: [UInt8]) -> CGImage? {

@@ -21,12 +21,12 @@ var litCv=document.createElement('canvas');litCv.width=litCv.height=512;var disc
 function gradeDisc(){if(discDay)return true;if(!disc.complete||!disc.naturalWidth)return false;
  // Safari has no CanvasRenderingContext2D.filter, so grade with plain compositing (works in every browser):
  // gain g = exposure multiplier (1 = original). Gain > 1 adds the map onto itself ('lighter'); gain < 1 lays black over it.
- function mk(gain){var c=document.createElement('canvas');c.width=c.height=1024;var x=c.getContext('2d');x.drawImage(disc,0,0,1024,1024);
+ function mk(gain,tint){var c=document.createElement('canvas');c.width=c.height=1024;var x=c.getContext('2d');x.drawImage(disc,0,0,1024,1024);
   if(gain>1){x.globalCompositeOperation='lighter';var k=gain-1;while(k>0){x.globalAlpha=Math.min(1,k);x.drawImage(disc,0,0,1024,1024);k-=1;}}
-  else{x.globalCompositeOperation='source-atop';x.globalAlpha=1-gain;x.fillStyle='#000';x.fillRect(0,0,1024,1024);}
+  else{x.globalCompositeOperation='source-atop';x.globalAlpha=1-gain;x.fillStyle=tint||'#000';x.fillRect(0,0,1024,1024);}
   x.globalAlpha=1;x.globalCompositeOperation='source-over';return c;}
  discDay=mk(1.55); // sunlit: original map, exposure raised, natural colours
- discNight=mk(.5); // night (active): map at ~50%, lands and colours still readable
+ discNight=mk(.22,'rgb(8,14,32)'); // night (active): deep navy at 0.78, lands faintly visible
  discNightAod=mk(.1); // night (always-on): ~10%, unchanged
  return true;}
 var disc=new Image();disc.src='disc.webp';disc.onload=draw;
