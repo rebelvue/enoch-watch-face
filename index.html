@@ -17,7 +17,7 @@ var cv=document.getElementById('c'),g=cv.getContext('2d'),W=396,H=484,dpr=Math.m
 cv.width=W*dpr;cv.height=H*dpr;g.scale(dpr,dpr);
 var CX=W/2,CY=H/2,R0=W/2-6,R=R0,D=Math.PI/180,pos={lat:47.0682,lon:21.8548,src:'default: Santandrei'};
 var nightCv=document.createElement('canvas');nightCv.width=nightCv.height=96;
-var litCv=document.createElement('canvas');litCv.width=litCv.height=512;var discDay=null,discNight=null,discNightAod=null;
+var nShCv=document.createElement('canvas'),dShCv=document.createElement('canvas');nShCv.width=nShCv.height=dShCv.width=dShCv.height=96;var litCv=document.createElement('canvas');litCv.width=litCv.height=512;var discDay=null,discNight=null,discNightAod=null;
 function gradeDisc(){if(discDay)return true;if(!disc.complete||!disc.naturalWidth)return false;
  // Safari has no CanvasRenderingContext2D.filter, so grade with plain compositing (works in every browser):
  // gain g = exposure multiplier (1 = original). Gain > 1 adds the map onto itself ('lighter'); gain < 1 lays black over it.
@@ -154,12 +154,16 @@ function draw(){var now=new Date(Date.now()+TOFF+SCS),S=sky(now.getTime());R=R0*
  // day/night: the sun's spotlight lights the region within ~90 deg (great circle) of the subsolar point.
  // Two graded copies of the map are cached: exposure-raised day and near-black night, natural colours; the day copy is
  // masked in by solar elevation per cell with a wide smooth falloff, no edge line, so the lit zone is never covered by night shade.
- var N=96,sh=nightCv.getContext('2d'),img=sh.createImageData(N,N),sl=S.sun[0]*D,so=S.sun[1]*D;
+ var N=96,sh=nightCv.getContext('2d'),img=sh.createImageData(N,N),nsh=nShCv.getContext('2d'),ni=nsh.createImageData(N,N),dsh=dShCv.getContext('2d'),di=dsh.createImageData(N,N),sl=S.sun[0]*D,so=S.sun[1]*D;
  for(var j=0;j<N;j++)for(var i=0;i<N;i++){var dx=(i+.5)/N*2-1,dy=(j+.5)/N*2-1,r=Math.hypot(dx,dy),k=(j*N+i)*4;if(r>1.02)continue;
   var la=(90-Math.min(r,1)*180)*D,lo=Math.atan2(dx,dy),c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);
-  var t=Math.min(1,Math.max(0,(c+.309)/.517)); /* wide twilight feather: sun elevation -18 to +12 deg, no edge */t=t*t*(3-2*t);img.data[k]=img.data[k+1]=img.data[k+2]=255;img.data[k+3]=Math.round(255*t);}
- sh.putImageData(img,0,0);
- if(gradeDisc()){g.imageSmoothingEnabled=true;g.drawImage(AOD?discNightAod:discNight,CX-R,CY-R,2*R,2*R);
+  var t=Math.min(1,Math.max(0,(c+.309)/.517)); /* wide twilight feather: sun elevation -18 to +12 deg, no edge */t=t*t*(3-2*t);img.data[k]=img.data[k+1]=img.data[k+2]=255;img.data[k+3]=Math.round(255*t);
+  // active mode, same as the watch: navy rgb(8,14,32) at 0.90*(1-t) over the original map, faint 0.12 screen lift on the day side
+  var na=.9*(1-t);ni.data[k]=8;ni.data[k+1]=14;ni.data[k+2]=32;ni.data[k+3]=Math.round(255*na);di.data[k]=di.data[k+1]=di.data[k+2]=31;di.data[k+3]=Math.round(255*t);}
+ sh.putImageData(img,0,0);nsh.putImageData(ni,0,0);dsh.putImageData(di,0,0);
+ if(!AOD&&disc.complete&&disc.naturalWidth){g.imageSmoothingEnabled=true;g.drawImage(disc,CX-R,CY-R,2*R,2*R);g.drawImage(nShCv,CX-R,CY-R,2*R,2*R);
+  g.globalCompositeOperation='screen';g.drawImage(dShCv,CX-R,CY-R,2*R,2*R);g.globalCompositeOperation='source-over';}
+ else if(gradeDisc()){g.imageSmoothingEnabled=true;g.drawImage(AOD?discNightAod:discNight,CX-R,CY-R,2*R,2*R);
   var lx=litCv.getContext('2d');lx.globalCompositeOperation='source-over';lx.clearRect(0,0,512,512);lx.drawImage(discDay,0,0,512,512);
   lx.globalCompositeOperation='destination-in';lx.imageSmoothingEnabled=true;lx.drawImage(nightCv,0,0,512,512);
   g.drawImage(litCv,CX-R,CY-R,2*R,2*R);}
