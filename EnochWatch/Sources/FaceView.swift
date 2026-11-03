@@ -287,9 +287,8 @@ struct FaceView: View {
             }
         }
 
-        // always-on: map dimmed heavily, no radar overlay
         // always-on: keep the active day/night shading and grid, just about 0.65x brightness (greyscale comes from .saturation(0))
-        if aod { g.fill(Path(ellipseIn: disc), with: .color(.black.opacity(0.35))) }: no rim light
+        if aod { g.fill(Path(ellipseIn: disc), with: .color(.black.opacity(0.35))) }
         // tactical overlay: range rings, radials, rim ticks
         let acc = Color(red: 0.75, green: 0.96, blue: 0.82)
         g.drawLayer { l in
