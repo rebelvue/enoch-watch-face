@@ -82,9 +82,12 @@ var grain=document.createElement('canvas');grain.width=grain.height=128;(functio
  for(var i=0;i<im.data.length;i+=4){var v=Math.random()*255;im.data[i]=im.data[i+1]=im.data[i+2]=v;im.data[i+3]=14;}x.putImageData(im,0,0);})();
 // ?t=2026-11-02T12:00Z previews another moment (testing); default is the live device clock
 var TOFF=(function(){var m=/[?&]t=([^&]+)/.exec(location.search),v=m&&Date.parse(decodeURIComponent(m[1]));return v?v-Date.now():0;})();
+// time scrub (wheel = Digital Crown): SCR target ms offset, SCS shown (spring); AOD preview (key A); DET detail card
+var SCR=0,SCS=0,SCV=0,wheelAt=0,AOD=false,DET=null,detAt=0;
 var gl1=document.createElement('canvas'),gl2=document.createElement('canvas');
 var gl3=document.createElement('canvas'),glSm=document.createElement('canvas'),glS=document.createElement('canvas');
 function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
+ if(AOD){g.save();g.textAlign='center';g.textBaseline='middle';g.font='italic 700 '+FS+'px CPB,'+MONO;g.strokeStyle='rgba(255,255,255,.55)';g.lineWidth=1.6;[[hh,CY-OY],[mm,CY+OY]].forEach(function(r){for(var i=0;i<2;i++)g.strokeText(r[0][i],CX+(i-.5)*FS*.62,r[1]);});g.restore();return;}
  // Apple Liquid Glass, clear variant: no frost. The glyphs are thick glass lenses. Inside each glyph the map is
  // magnified ~1.2x and bent toward the edges (displacement along the gradient of a blurred copy of the glyph alpha,
  // i.e. a soft distance-to-edge field), with a slight chromatic fringe, a thin bright specular rim on edges facing the
@@ -134,14 +137,15 @@ function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
  sg.addColorStop(Math.max(0,Math.min(1,sw-.22)),'rgba(255,255,255,0)');sg.addColorStop(Math.max(0,Math.min(1,sw)),'rgba(255,255,255,.3)');sg.addColorStop(Math.max(0,Math.min(1,sw+.22)),'rgba(255,255,255,0)');
  b.globalCompositeOperation='lighter';b.fillStyle=sg;each(b,0,0,b.fillText);b.globalCompositeOperation='source-over';mask(b);
  // parallax: the glass digits float above the map (about 6 watch points at this scale)
- var px=TL.x*12,py=-TL.y*12;g.drawImage(gl1,px,py,W,H);g.drawImage(gl2,px,py,W,H);}
+ var px=TL.x*22,py=-TL.y*22;g.drawImage(gl1,px,py,W,H);g.drawImage(gl2,px,py,W,H);}
 // tilt: DeviceOrientation (iOS asks permission on first tap), pointer position on desktop; low-pass filtered, -1..1
 var TL={x:0,y:0},TT={x:0,y:0};
 function onOri(e){if(e.gamma==null)return;TT.x=Math.max(-1,Math.min(1,e.gamma/45));TT.y=Math.max(-1,Math.min(1,-(e.beta-40)/45));}
 if(window.DeviceOrientationEvent){if(typeof DeviceOrientationEvent.requestPermission==='function'){document.addEventListener('click',function ask(){DeviceOrientationEvent.requestPermission().then(function(r){if(r==='granted')window.addEventListener('deviceorientation',onOri);}).catch(function(){});document.removeEventListener('click',ask);});}
  else window.addEventListener('deviceorientation',onOri);}
 window.addEventListener('pointermove',function(e){if(e.pointerType!=='mouse')return;var r=cv.getBoundingClientRect();TT.x=Math.max(-1,Math.min(1,((e.clientX-r.left)/r.width-.5)*2));TT.y=Math.max(-1,Math.min(1,-((e.clientY-r.top)/r.height-.5)*2));});
-function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom;window.__sky={t:now.getTime(),sun:S.sun,moon:S.moon,gst:S.gst};
+function PX(k){g.translate(TL.x*k,-TL.y*k);}
+function draw(){var now=new Date(Date.now()+TOFF+SCS),S=sky(now.getTime());R=R0*zoom;window.__sky={t:now.getTime(),sun:S.sun,moon:S.moon,gst:S.gst};
  // beyond the ice wall: not outer space, a calm warm neutral (the dome rests on the ice wall)
  g.fillStyle='#000';g.fillRect(0,0,W,H);
  // map
@@ -162,7 +166,9 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  var dm=g.createRadialGradient(CX,CY,0,CX,CY,R*1.03);dm.addColorStop(0,'rgba(190,240,210,.03)');dm.addColorStop(.75,'rgba(190,240,210,.07)');dm.addColorStop(1,'rgba(200,235,215,.32)');
  g.fillStyle=dm;g.fillRect(CX-R,CY-R,2*R,2*R);
  g.restore();
- g.strokeStyle='rgba(220,245,230,.9)';g.lineWidth=1.2;g.beginPath();g.arc(CX,CY,R,0,7);g.stroke();
+ if(AOD){g.fillStyle='rgba(0,0,0,.78)';g.beginPath();g.arc(CX,CY,R,0,7);g.fill();}
+ g.strokeStyle=AOD?'rgba(255,255,255,.35)':'rgba(220,245,230,.9)';g.lineWidth=1.2;g.beginPath();g.arc(CX,CY,R,0,7);g.stroke();
+ if(!AOD){
  // tactical overlay: range rings (every 30 deg of latitude), radials, rim ticks with labels
  g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();g.strokeStyle='rgba(191,245,210,.22)';g.lineWidth=.8;
  [60,30,0,-30,-60].forEach(function(la){g.beginPath();g.arc(CX,CY,(90-la)/180*R,0,7);g.stroke();});
@@ -171,30 +177,33 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  g.strokeStyle=ACC;g.fillStyle=ACC;g.font='700 7px '+MONO;g.textAlign='center';g.textBaseline='middle';
  for(var k=0;k<36;k++){var a=k*10*D,l=k%3?3:7,sx=Math.sin(a),cy_=Math.cos(a);g.lineWidth=k%3?.8:1.2;
   g.beginPath();g.moveTo(CX+(R-l)*sx,CY+(R-l)*cy_);g.lineTo(CX+R*sx,CY+R*cy_);g.stroke();
-  if(k%3===0&&k!==9&&k!==27&&R<H/2-14){var lo=k*10>180?k*10-360:k*10;g.fillText(Math.abs(lo).toString().padStart(3,'0')+(lo>0&&lo<180?'E':lo<0?'W':''),CX+(R+9)*sx,CY+(R+9)*cy_);}}
+  if(k%3===0&&k!==9&&k!==27&&!(k===18&&Math.abs(SCS)>=6e4)&&R<H/2-14){var lo=k*10>180?k*10-360:k*10;g.fillText(Math.abs(lo).toString().padStart(3,'0')+(lo>0&&lo<180?'E':lo<0?'W':''),CX+(R+9)*sx,CY+(R+9)*cy_);}}
+ }
  // time digits (flat Liquid Glass lens): over map, day/night and grid; under country/city outlines, stars, sun, moon and tags
  var hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');glassTime(hh,mm);
  // current country and city outlines over the glass digits
- g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();drawBorders();g.restore();
- g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();
+ // layered parallax (map, shading and grid stay fixed): digits 22, outlines 12, sky 8, comps and text 6 px
+ g.save();PX(12);if(AOD)g.globalAlpha=.7;g.beginPath();g.arc(CX,CY,R,0,7);g.clip();drawBorders();g.restore();
+ g.save();PX(8);if(AOD)g.globalAlpha=.45;g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();
  // stars inside the firmament, turning around the pole with sidereal time; faint by day, bright at night
  var rot=S.gst*D;
  // real bright stars (HYG, mag<4.5): over the ground point at lat=Dec, lon=RA-GST, like the sun and moon
  stars.forEach(function(t,ix){var lo=((t[0]-S.gst)%360+540)%360-180,r=(90-t[1])/180;if(r>1)return;var a=lo*D;if(!ix)window.__sky.star0=[CX+r*R*Math.sin(a),CY+r*R*Math.cos(a)];
-  var n=nightAt(r,a,sl,so);g.globalAlpha=Math.min(1,(.15+.85*n)*(1.15-t[2]*.18));
-  var ci=t[3];g.fillStyle=ci<0?'#cfe0ff':ci<.6?'#fffaf0':ci<1.2?'#ffe7c0':'#ffc9a0';
-  g.beginPath();g.arc(CX+r*R*Math.sin(a),CY+r*R*Math.cos(a),Math.max(.45,2.1-t[2]*.38),0,7);g.fill();});
- g.globalAlpha=1;
+  // flat dome sky: every star the same 1 px white dot, no colour or size variation
+  var n=nightAt(r,a,sl,so),ga=g.globalAlpha;g.globalAlpha=ga*(.2+.8*n);g.fillStyle='#fff';
+  g.fillRect(CX+r*R*Math.sin(a)-.5,CY+r*R*Math.cos(a)-.5,1,1);g.globalAlpha=ga;});
  g.restore();
  // sun: soft lit glow + tactical tag
  var p=P(S.sun[0],S.sun[1]);sunIcon(p[0],p[1]);
  /* no SUN tag */
  var m=P(S.moon[0],S.moon[1]);moonIcon(m[0],m[1],8,S.ph);
+ g.restore();
  if(QP.get('debug')){var ss=P(S.sun[0],S.sun[1]),sm=P(S.moon[0],S.moon[1]);g.save();g.lineWidth=1.5;g.strokeStyle='#f0f';g.beginPath();g.arc(ss[0],ss[1],12,0,7);g.moveTo(ss[0]-16,ss[1]);g.lineTo(ss[0]+16,ss[1]);g.moveTo(ss[0],ss[1]-16);g.lineTo(ss[0],ss[1]+16);g.stroke();
   g.strokeStyle='#0ff';g.beginPath();g.arc(sm[0],sm[1],10,0,7);g.stroke();g.fillStyle='#f0f';g.font='700 8px '+MONO;g.textAlign='center';g.fillText('SUBSOLAR '+S.sun[0].toFixed(1)+','+S.sun[1].toFixed(1),CX,H-46);g.fillStyle='#0ff';g.fillText('SUBLUNAR '+S.moon[0].toFixed(1)+','+S.moon[1].toFixed(1),CX,H-36);g.restore();}
- corners(now,S);
- g.save();g.globalAlpha=.06;g.fillStyle='#000';for(var sy=0;sy<H;sy+=3)g.fillRect(0,sy,W,1);g.globalAlpha=1;
- var gp=g.createPattern(grain,'repeat');g.translate(Math.random()*128,Math.random()*128);g.fillStyle=gp;g.fillRect(-128,-128,W+256,H+256);g.restore();
+ g.save();PX(6);if(AOD)g.globalAlpha=.6;corners(now,S);g.restore();
+ if(DET)detail(now,S);
+ if(!AOD){g.save();g.globalAlpha=.06;g.fillStyle='#000';for(var sy=0;sy<H;sy+=3)g.fillRect(0,sy,W,1);g.globalAlpha=1;
+ var gp=g.createPattern(grain,'repeat');g.translate(Math.random()*128,Math.random()*128);g.fillStyle=gp;g.fillRect(-128,-128,W+256,H+256);g.restore();}
  document.getElementById('info').textContent='Position: '+pos.lat.toFixed(3)+', '+pos.lon.toFixed(3)+' ('+pos.src+')';}
 // ---- four corner complications ----
 var HOME={lat:47.0682,lon:21.8548},wx={t:null,at:0};
@@ -230,9 +239,23 @@ function sunEvent(now,S){ // next sunrise/sunset at pos, from subsolar point (lo
  for(var k=-1;k<=1;k++){ev.push([noon+k*864e5-h0*36e5,'RISE']);ev.push([noon+k*864e5+h0*36e5,'SET']);}
  ev=ev.filter(function(e){return e[0]>now.getTime();}).sort(function(a,b){return a[0]-b[0];});
  return[fmt(new Date(ev[0][0])),ev[0][1],ev[0][0]];}
+function sunDay(now,S){var la=pos.lat*D,de=S.sun[0]*D,c=(Math.sin(-.833*D)-Math.sin(la)*Math.sin(de))/(Math.cos(la)*Math.cos(de));if(Math.abs(c)>1)return null;
+ var h0=Math.acos(c)/D/15,dn=((S.sun[1]-pos.lon)/15%24+36)%24-12,noon=now.getTime()+dn*36e5;return[noon-h0*36e5,noon+h0*36e5];}
+// detail card: clear glass rounded rect (no frost, no shadow), orange labels, white values
+function detail(now,S){var w=230,h=150,x=CX-w/2,y=CY-h/2;g.save();g.fillStyle='rgba(0,0,0,.5)';g.strokeStyle='rgba(255,255,255,.65)';g.lineWidth=1;
+ g.beginPath();g.roundRect(x,y,w,h,26);g.fill();g.stroke();g.textBaseline='middle';
+ function L(t,yy){g.font='800 11px '+MONO;g.fillStyle=AMB;g.textAlign='left';g.fillText(t,x+18,yy);}
+ function V(t,yy,fs,al){g.font='800 '+(fs||17)+'px '+MONO;g.fillStyle='#fff';g.textAlign=al||'right';g.fillText(t,al==='left'?x+18:x+w-18,yy);}
+ if(DET==='rain'){L('RAIN NEXT 6H',y+22);var hs=wx.h||[];if(!hs.length)V('NO DATA',y+80,16,'left');
+  hs.slice(0,6).forEach(function(p,i){var bx=x+24+i*32,bh=2+60*p/100;g.fillStyle='#fff';g.fillRect(bx,y+118-bh,18,bh);g.font='800 9px '+MONO;g.textAlign='center';g.fillText(p,bx+9,y+110-bh);
+   g.fillStyle=AMB;g.fillText(String((now.getHours()+i)%24).padStart(2,'0'),bx+9,y+132);});}
+ else if(DET==='battery'){L('BATTERY',y+28);V(batt?Math.round(batt.level*100)+'%':'--',y+70,34,'left');V(batt?(batt.charging?(batt.level>=1?'FULL':'CHARGING'):'ON BATTERY'):'UNAVAILABLE',y+115,13,'left');}
+ else if(DET==='bpm'){L('HEART RATE',y+28);V('--',y+70,34,'left');V('WATCH ONLY',y+115,13,'left');}
+ else {var sd=sunDay(now,S);if(sd){var m=Math.round((sd[1]-sd[0])/6e4);L('SUNRISE',y+36);V(fmt(new Date(sd[0])),y+36);L('SUNSET',y+74);V(fmt(new Date(sd[1])),y+74);L('DAY',y+112);V(Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m',y+112);}else{L('SUN',y+74);V('POLAR',y+74);}}
+ g.restore();}
 function moonName(p){var f=p/(2*Math.PI);return f<.03||f>.97?'NEW MOON':f<.22?'WAXING CRESCENT':f<.28?'FIRST QUARTER':f<.47?'WAXING GIBBOUS':f<.53?'FULL MOON':f<.72?'WANING GIBBOUS':f<.78?'LAST QUARTER':'WANING CRESCENT';}
 function getWx(){if(Date.now()-wx.at<72e4)return;wx.at=Date.now();
- fetch('https://api.open-meteo.com/v1/forecast?latitude='+pos.lat.toFixed(3)+'&longitude='+pos.lon.toFixed(3)+'&current=temperature_2m&hourly=precipitation_probability&forecast_hours=1').then(function(r){return r.json();}).then(function(j){wx.t=Math.round(j.current.temperature_2m);wx.ok=Date.now();wx.p=(j.hourly&&j.hourly.precipitation_probability)?j.hourly.precipitation_probability[0]:null;}).catch(function(){});}
+ fetch('https://api.open-meteo.com/v1/forecast?latitude='+pos.lat.toFixed(3)+'&longitude='+pos.lon.toFixed(3)+'&current=temperature_2m&hourly=precipitation_probability&forecast_hours=6').then(function(r){return r.json();}).then(function(j){wx.t=Math.round(j.current.temperature_2m);wx.ok=Date.now();wx.h=(j.hourly&&j.hourly.precipitation_probability||[]).map(function(v){return v||0;});wx.p=wx.h.length?wx.h[0]:null;}).catch(function(){});}
 var batt=null;if(navigator.getBattery)navigator.getBattery().then(function(b){batt=b;}).catch(function(){});
 function chip(x,y,al,top,big,fs){fs=fs||16;g.save();g.textAlign=al;g.textBaseline='middle';g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=4;
  g.font='700 9px '+MONO;var w=Math.max(g.measureText(top).width,(g.font='800 '+fs+'px '+MONO,g.measureText(big).width))+10,x0=al==='left'?x-5:x-w+5,y0=y-9,h=34,c=6;
@@ -265,6 +288,8 @@ function corners(now,S){getWx();var se=sunEvent(now,S);
  g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';
  g.fillText(place.name||'SANTANDREI, ROMANIA',CX,16);
  g.font='700 8px '+MONO;g.fillStyle=AMB;g.fillText(['SUN','MON','TUE','WED','THU','FRI','SAT'][now.getDay()]+' '+String(now.getDate()).padStart(2,'0')+' '+['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][now.getMonth()]+' '+now.getFullYear(),CX,29);
+ if(Math.abs(SCS)>=6e4){var mn=Math.round(Math.abs(SCS)/6e4),dd=Math.floor(mn/1440),hh2=Math.floor(mn%1440/60),mi=mn%60,tx=dd?dd+'d '+hh2+'h':hh2?hh2+'h '+String(mi).padStart(2,'0')+'m':mi+'m',sg=SCS>0?'+':'-';
+  var tw=g.measureText(sg+tx).width,sw0=g.measureText(sg).width;g.textAlign='left';g.fillStyle=AMB;g.fillText(sg,CX-tw/2,41);g.fillStyle='#fff';g.fillText(tx,CX-tw/2+sw0,41);g.textAlign='center';}
  g.font='800 9px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('default')===0?' FALLBACK':''),CX,H-11);g.restore();}
 var QP=new URLSearchParams(location.search);if(QP.get('lat')&&QP.get('lon'))pos={lat:+QP.get('lat'),lon:+QP.get('lon'),src:'test override'};
 if(navigator.geolocation&&!QP.get('lat'))navigator.geolocation.watchPosition(function(r){var mv=Math.hypot(r.coords.latitude-pos.lat,r.coords.longitude-pos.lon)>.05;pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS \u00b1'+Math.round(r.coords.accuracy)+' m'};if(mv)wx.at=0;},function(){},{enableHighAccuracy:false,maximumAge:6e4,timeout:2e4});
@@ -277,15 +302,29 @@ function zStep(n){var dt=Math.min(.05,(n-zl)/1000),w=2*Math.PI/.35,h=1/240;zl=n;
  while(dt>0){var s=Math.min(h,dt);zv+=(-w*w*(zoom-zt)-2*.65*w*zv)*s;zoom+=zv*s;dt-=s;}
  if(Math.abs(zoom-zt)<5e-4&&Math.abs(zv)<1e-3){zoom=zt;zv=0;zRun=false;}draw();if(zRun)requestAnimationFrame(zStep);}
 function toggle(){setZoom(zt<(1+ZF)/2?ZF:1);}
-var pinch=null,lastTap=0;
-cv.addEventListener('touchstart',function(e){if(e.touches.length===2){var a=e.touches[0],b=e.touches[1];pinch={d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),z:zr};e.preventDefault();}
- else if(e.touches.length===1){var t=Date.now();if(t-lastTap<300){toggle();e.preventDefault();lastTap=0;}else lastTap=t;}},{passive:false});
-cv.addEventListener('touchmove',function(e){if(pinch&&e.touches.length===2){var a=e.touches[0],b=e.touches[1];setZoom(pinch.z*Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)/pinch.d,true);}e.preventDefault();},{passive:false});
-cv.addEventListener('touchend',function(e){if(e.touches.length<2)pinch=null;});
+// zoom is tap only: double click / double tap toggles with the spring; single click on a comp opens its detail card
+var clk=0,clkT=0;
+function hit(e){var r=cv.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W-CX,y=(e.clientY-r.top)/r.height*H-CY;
+ if(Math.hypot(x,y)<R0*.6)return null;var a=Math.atan2(y,x)/D,best=null,bd=40;
+ [[-126,'sun'],[-54,'bpm'],[126,'rain'],[54,'battery']].forEach(function(o){var d=Math.abs(((o[0]-a)%360+540)%360-180);if(d<bd){bd=d;best=o[1];}});return best;}
+cv.addEventListener('click',function(e){var t=Date.now();clearTimeout(clkT);
+ if(t-clk<300){clk=0;DET=null;toggle();return;}clk=t;var ev={clientX:e.clientX,clientY:e.clientY};
+ clkT=setTimeout(function(){if(DET){DET=null;}else{var k=hit(ev);if(k){DET=k;detAt=Date.now();}}draw();},300);});
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
-cv.addEventListener('wheel',function(e){e.preventDefault();setZoom(zr*Math.exp(-e.deltaY*(e.ctrlKey?.01:.002)),true);},{passive:false});
-cv.addEventListener('dblclick',function(e){e.preventDefault();toggle();});
+cv.addEventListener('dblclick',function(e){e.preventDefault();});
+// wheel / trackpad scroll = crown: scrub time, rate grows with scroll speed (minutes when slow, hours or days when fast)
+cv.addEventListener('wheel',function(e){e.preventDefault();if(AOD)return;if(DET){DET=null;draw();return;}var t=performance.now(),dt=Math.max(16,t-(wheelAt||t-100)),dy=-(e.deltaMode?e.deltaY*16:e.deltaY);wheelAt=t;
+ var sp=Math.abs(dy)/dt,mpp=Math.min(720,.3*(1+Math.pow(sp,1.6)*1.2));SCR=Math.max(-2592e6,Math.min(2592e6,SCR+dy*mpp*6e4));},{passive:false});
+document.addEventListener('keydown',function(e){if(e.key==='a'||e.key==='A'){AOD=!AOD;if(AOD){SCR=SCS=SCV=0;DET=null;}draw();}});
 Promise.all([document.fonts.load("800 20px 'JBM'"),document.fonts.load("italic 700 20px 'CPB'")]).then(draw,draw);draw();setInterval(draw,100);
 // tilt filter at ~30 Hz (redraws ride the 10 Hz loop, plus here when the light is moving)
-setInterval(function(){var dx=(TT.x-TL.x)*.18,dy=(TT.y-TL.y)*.18;TL.x+=dx;TL.y+=dy;if(Math.abs(dx)+Math.abs(dy)>.002&&!zRun)draw();},33);
+// ~60 Hz: tilt through a critically damped spring (response .4 s, no jitter), scrub spring (springs back to now 2 s after the wheel stops), detail timeout 6 s
+var TV={x:0,y:0},tl0=performance.now();
+setInterval(function(){var n=performance.now(),dt=Math.min(.1,(n-tl0)/1000),w=2*Math.PI/.4,mv=false;tl0=n;
+ var tx=AOD?0:TT.x,ty=AOD?0:TT.y;TV.x+=(-w*w*(TL.x-tx)-2*w*TV.x)*dt;TV.y+=(-w*w*(TL.y-ty)-2*w*TV.y)*dt;TL.x+=TV.x*dt;TL.y+=TV.y*dt;
+ if(Math.abs(TV.x)+Math.abs(TV.y)>.01)mv=true;
+ if(SCR&&n-wheelAt>2000)SCR=0;var w2=2*Math.PI/.7;SCV+=(-w2*w2*(SCS-SCR)-2*.9*w2*SCV)*dt;SCS+=SCV*dt;
+ if(Math.abs(SCS-SCR)<3e4&&Math.abs(SCV)<6e4){SCS=SCR;SCV=0;}else mv=true;
+ if(DET&&Date.now()-detAt>6000){DET=null;mv=true;}
+ if(mv&&!zRun)draw();},16);
 </script></body></html>

@@ -90,60 +90,58 @@ struct FaceView: View {
     }()
     private let moonTex: CGImage? = UIImage(named: "moon")?.cgImage
 
-    // crown value may run a little past [1, fillZoom] (rubber band); the drawn zoom is a per-frame spring toward it
-    @State private var crown: Double = 1
+    // Digital Crown scrubs time (velocity based); zoom is double-tap only, spring overshoots and settles
+    @Environment(\.isLuminanceReduced) private var aod
+    @State private var crown: Double = 0
+    @State private var zt: Double = 1                       // zoom target
     @State private var zs = ZoomSpring()
+    @State private var sc = ZoomSpring(response: 0.7, damping: 0.9)  // shown scrub offset (hours), follows `scrub`
+    @State private var scrub: Double = 0                    // target scrub offset, hours; 0 = live
     @State private var fast = false
     @State private var crownAt = Date.distantPast
-    private var lo: Double { 0.82 }
-    private var hi: Double { fillZoom + 0.35 }
-    /// rubber band: past either limit the map only follows 40% of the crown
-    private func rubber(_ v: Double) -> Double { v < 1 ? 1 - (1 - v) * 0.4 : v > fillZoom ? fillZoom + (v - fillZoom) * 0.4 : v }
+    @State private var detail: Comp? = nil
+    @State private var detailAt = Date.distantPast
+    enum Comp { case sun, bpm, rain, battery }
 
     var body: some View {
-        // 60 fps while the zoom spring moves, 30 fps otherwise (wrist motion drives the glass light every frame)
-        TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : 1.0 / 30)) { ctx in
-            let tilt = motion.read(ctx.date)
-            let _ = zs.step(to: rubber(crown), at: ctx.date)
-            ZStack {
-                // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon + tags, comps and text
-                Canvas { g, size in draw(&g, size, ctx.date, 0) }
-                GlassTime(date: ctx.date, tilt: tilt).zIndex(1)
-                Canvas { g, size in draw(&g, size, ctx.date, 3) }.zIndex(2).allowsHitTesting(false)
-                Canvas { g, size in draw(&g, size, ctx.date, 1) }.zIndex(3).allowsHitTesting(false)
-                Canvas { g, size in draw(&g, size, ctx.date, 2) }.zIndex(4).allowsHitTesting(false)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
+        Group {
+            if aod { TimelineView(.everyMinute) { ctx in face(ctx.date) } }
+            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : 1.0 / 30)) { ctx in face(ctx.date) } }
         }
         .ignoresSafeArea()
         // crown attached to a concrete, framed, focused view (avoids "Crown Sequencer was set up without a view property")
         .focusable(true)
         .focused($crownFocus)
-        .digitalCrownRotation($crown, from: lo, through: hi, by: 0.01, sensitivity: .low,
-                              isContinuous: false, isHapticFeedbackEnabled: true)
+        .digitalCrownRotation($crown, from: -1e7, through: 1e7, by: 0.01, sensitivity: .medium,
+                              isContinuous: true, isHapticFeedbackEnabled: true)
         .onChange(of: crown) { old, v in
-            crownAt = Date(); fast = true
-            let wasIn = old >= 1 && old <= fillZoom, isIn = v >= 1 && v <= fillZoom
-            if wasIn && !isIn { WKInterfaceDevice.current().play(.click) } // detent as you pass either end
-            zoom = min(fillZoom, max(1, v))
+            let now = Date(), dt = max(0.016, now.timeIntervalSince(crownAt)); crownAt = now; fast = true
+            if detail != nil { detail = nil; return }
+            if aod { return }
+            // acceleration curve: slow turn = minutes, fast spin = hours, very fast = days
+            let dv = v - old, speed = abs(dv) / dt
+            let hoursPerUnit = min(12, 0.17 * (1 + pow(speed, 1.6) * 0.6))
+            scrub = max(-720, min(720, scrub + dv * hoursPerUnit))
         }
         .onTapGesture(count: 2) {
-            // spring to the other end (the spring itself overshoots a little and settles)
-            crown = zoom < (1 + fillZoom) / 2 ? fillZoom : 1
+            detail = nil
+            zt = zt < (1 + fillZoom) / 2 ? fillZoom : 1; zoom = zt; fast = true
         }
-        // released past a limit: snap the crown back so the spring rubber-bands to the limit; drop to 30 fps once settled
+        .onTapGesture(count: 1, coordinateSpace: .local) { p in tap(p) }
+        // crown idle 2 s: spring back to now; detail card times out after 6 s; drop to 30 fps once settled
         .task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 80_000_000)
-                let idle = Date().timeIntervalSince(crownAt) > 0.22
-                if idle && (crown < 1 || crown > fillZoom) { crown = min(fillZoom, max(1, crown)) }
-                let f = zs.moving || !idle
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                let now = Date()
+                if scrub != 0 && now.timeIntervalSince(crownAt) > 2 { scrub = 0 }
+                if detail != nil && now.timeIntervalSince(detailAt) > 6 { detail = nil }
+                let f = zs.moving || sc.moving || now.timeIntervalSince(crownAt) < 0.3
                 if f != fast { fast = f }
             }
         }
         .background(Color.black)
-        .onAppear { crown = min(fillZoom, max(1, zoom)); zs.reset(crown); motion.start(); crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
+        .onAppear { zt = min(fillZoom, max(1, zoom)); zs.reset(zt); if !aod { motion.start() }; crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
+        .onChange(of: aod) { _, v in if v { motion.stop(); scrub = 0; detail = nil } else { motion.start() } }
         // weather fetch lives outside the draw path: every 12 min, and when the location moves
         .task { while !Task.isCancelled { fetchTemp(loc.coord); try? await Task.sleep(nanoseconds: 720_000_000_000) } }
         .onChange(of: loc.live) { _ in fetchTemp(loc.coord) }
@@ -154,7 +152,101 @@ struct FaceView: View {
         ._statusBarHidden(true)
     }
 
-    private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ layer: Int) {
+    private static func px(_ t: CGPoint, _ k: Double) -> CGSize { CGSize(width: t.x * k, height: -t.y * k) }
+
+    /// One frame. Map, grid and day/night stay fixed; overlays float at different depths with wrist tilt
+    /// (digits 11 pt, outlines 6 pt, sky 4 pt, comps and text 3 pt). AOD: no motion, no scrub.
+    @ViewBuilder private func face(_ now: Date) -> some View {
+        let tilt = aod ? CGPoint.zero : motion.read(now)
+        let _ = zs.step(to: zt, at: now)
+        let off = aod ? 0 : sc.step(to: scrub, at: now)
+        let date = now.addingTimeInterval(off * 3600)
+        ZStack {
+            // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon, comps and text
+            Canvas { g, size in draw(&g, size, date, 0) }
+            GlassTime(date: date, tilt: tilt, aod: aod).offset(Self.px(tilt, 11)).zIndex(1)
+            Canvas { g, size in draw(&g, size, date, 3) }.offset(Self.px(tilt, 6)).zIndex(2).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 1) }.offset(Self.px(tilt, 4)).zIndex(3).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 2, off) }.offset(Self.px(tilt, 3)).zIndex(4).allowsHitTesting(false)
+            if let k = detail { card(k, date).zIndex(5) }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    private func tap(_ p: CGPoint) {
+        if detail != nil { detail = nil; return }
+        let b = WKInterfaceDevice.current().screenBounds.size, dx = p.x - b.width / 2, dy = p.y - b.height / 2
+        guard hypot(dx, dy) > (min(b.width, b.height) / 2 - 4) * 0.6 else { return }
+        let a = atan2(dy, dx) * 180 / .pi
+        func dist(_ x: Double) -> Double { abs((x - a + 540).truncatingRemainder(dividingBy: 360) - 180) }
+        let opts: [(Double, Comp)] = [(-126, .sun), (-54, .bpm), (126, .rain), (54, .battery)]
+        if let m = opts.min(by: { dist($0.0) < dist($1.0) }), dist(m.0) < 40 {
+            detail = m.1; detailAt = Date(); WKInterfaceDevice.current().play(.click) }
+    }
+
+    /// Detail card: clear Liquid Glass rounded rect (no frost, no shadow), orange labels, white values.
+    private func card(_ k: Comp, _ date: Date) -> some View {
+        let o = FaceView.orange, mono = { (s: CGFloat) in Font.system(size: s, weight: .heavy, design: .monospaced) }
+        let tf = DateFormatter(); tf.dateFormat = "HH:mm"
+        func row(_ l: String, _ v: String) -> some View {
+            HStack { Text(l).font(mono(9)).foregroundColor(o); Spacer(); Text(v).font(mono(13)).foregroundColor(.white) } }
+        return VStack(alignment: .leading, spacing: 5) {
+            switch k {
+            case .rain:
+                Text("RAIN NEXT 6H").font(mono(9)).foregroundColor(o)
+                if rain6.isEmpty { Text("NO DATA").font(mono(12)).foregroundColor(.white) }
+                else {
+                    HStack(alignment: .bottom, spacing: 5) {
+                        ForEach(Array(rain6.prefix(6).enumerated()), id: \.offset) { i, p in
+                            VStack(spacing: 2) {
+                                Text("\(p)").font(mono(8)).foregroundColor(.white)
+                                RoundedRectangle(cornerRadius: 1.5).fill(Color.white).frame(width: 12, height: 2 + 34 * Double(p) / 100)
+                                Text(String(format: "%02d", (Calendar.current.component(.hour, from: Date()) + i) % 24)).font(mono(7)).foregroundColor(o)
+                            }
+                        }
+                    }
+                }
+            case .battery:
+                let dev = WKInterfaceDevice.current(), b = Double(dev.batteryLevel)
+                let st: String = { switch dev.batteryState { case .charging: return "CHARGING"; case .full: return "FULL"; case .unplugged: return "ON BATTERY"; default: return "UNKNOWN" } }()
+                Text("BATTERY").font(mono(9)).foregroundColor(o)
+                Text(b < 0 ? "--" : "\(Int(b * 100))%").font(mono(24)).foregroundColor(b >= 0 && b < 0.2 ? FaceView.alert : .white)
+                Text(st).font(mono(10)).foregroundColor(.white)
+            case .bpm:
+                Text("HEART RATE").font(mono(9)).foregroundColor(o)
+                Text(hr.bpm.map { "\($0)" } ?? "--").font(mono(24)).foregroundColor(.white)
+                if let lo = hr.lo, let hi = hr.hi { row("1H MIN", "\(lo)"); row("1H MAX", "\(hi)") }
+            case .sun:
+                if let sd = sunDay(date) {
+                    let r = sd.0, s = sd.1
+                    let m = Int(s.timeIntervalSince(r) / 60)
+                    row("SUNRISE", tf.string(from: r)); row("SUNSET", tf.string(from: s)); row("DAY", "\(m / 60)h \(String(format: "%02d", m % 60))m")
+                } else { row("SUN", "POLAR") }
+            }
+        }
+        .padding(12).frame(width: 156)
+        .background { cardBG }
+        .contentShape(Rectangle())
+        .onTapGesture { detail = nil }
+    }
+    @ViewBuilder private var cardBG: some View {
+        let r = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        if #available(watchOS 26.0, *) { Color.black.opacity(0.45).clipShape(r).glassEffect(.clear, in: r) }
+        else { r.fill(Color.black.opacity(0.45)).overlay(r.stroke(Color.white.opacity(0.6), lineWidth: 0.8)) }
+    }
+
+    /// Today's sunrise and sunset at your position (local solar calc from the subsolar point); nil in polar day/night.
+    private func sunDay(_ date: Date) -> (Date, Date)? {
+        let sky = Sky(date: date), d = Double.pi / 180, me = loc.coord
+        let cc = (sin(-0.833 * d) - sin(me.latitude * d) * sin(sky.sunLat * d)) / (cos(me.latitude * d) * cos(sky.sunLat * d))
+        guard abs(cc) <= 1 else { return nil }
+        let h0 = acos(cc) / d / 15, dn = ((sky.sunLon - me.longitude) / 15).truncatingRemainder(dividingBy: 24)
+        let dn2 = dn > 12 ? dn - 24 : (dn < -12 ? dn + 24 : dn), noon = date.addingTimeInterval(dn2 * 3600)
+        return (noon.addingTimeInterval(-h0 * 3600), noon.addingTimeInterval(h0 * 3600))
+    }
+
+    private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ layer: Int, _ scrubH: Double = 0) {
         let sky = Sky(date: date), d = Double.pi / 180
         let c = CGPoint(x: size.width / 2, y: size.height / 2), R = (min(size.width, size.height) / 2 - 4) * zs.x
         // World of Enoch projection: r = (90 - lat)/180 * R, lon 0 pointing down, east to the right
@@ -185,6 +277,8 @@ struct FaceView: View {
                 .init(color: Color(red: 0.78, green: 0.92, blue: 0.84).opacity(0.32), location: 1)]), center: c, startRadius: 0, endRadius: R * 1.03))
         }
 
+        // always-on: map dimmed heavily, no radar overlay
+        if aod { g.fill(Path(ellipseIn: disc), with: .color(.black.opacity(0.78))); g.stroke(Path(ellipseIn: disc), with: .color(.white.opacity(0.35)), lineWidth: 0.8); return }
         // tactical overlay: range rings, radials, rim ticks
         let acc = Color(red: 0.75, green: 0.96, blue: 0.82)
         g.drawLayer { l in
@@ -202,6 +296,7 @@ struct FaceView: View {
         if layer == 3 {
         // current country and city outlines, drawn above the glass digits so your location reads through them
         let disc = CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R)
+        if aod { g.opacity = 0.7 }
         g.drawLayer { l in
             l.clip(to: Path(ellipseIn: disc))
             // current country (thin orange) and city (thinner orange) boundaries, projected like the map
@@ -215,16 +310,17 @@ struct FaceView: View {
         }
         if layer == 1 {
         let disc = CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R), sl = sky.sunLat * d, so = sky.sunLon * d
+        if aod { g.opacity = 0.45 }
         g.drawLayer { l in
             l.clip(to: Path(ellipseIn: disc))
             // real stars over the ground point lat = Dec, lon = RA - GST (same as sun and moon); faint by day
             for st in stars {
                 let r = (90 - st[1]) / 180; if r > 1 { continue }
                 let lo = (st[0] - sky.siderealDeg) * d, e = sin(st[1] * d) * sin(sl) + cos(st[1] * d) * cos(sl) * cos(lo - so)
-                let night = min(1, max(0, (0.08 - e) * 4)), rad = max(0.4, 1.8 - st[2] * 0.32)
+                // flat dome sky: every star the same small white dot (about 1 pt), no colour or size variation
+                let night = min(1, max(0, (0.08 - e) * 4))
                 let p = CGPoint(x: c.x + r * R * sin(lo), y: c.y + r * R * cos(lo))
-                let col = st[3] < 0 ? Color(red: 0.81, green: 0.88, blue: 1) : st[3] < 1.2 ? Color(red: 1, green: 0.96, blue: 0.88) : Color(red: 1, green: 0.79, blue: 0.63)
-                l.fill(Path(ellipseIn: CGRect(x: p.x - rad, y: p.y - rad, width: 2 * rad, height: 2 * rad)), with: .color(col.opacity(min(1, (0.15 + 0.85 * night) * (1.15 - st[2] * 0.18)))))
+                l.fill(Path(ellipseIn: CGRect(x: p.x - 0.5, y: p.y - 0.5, width: 1, height: 1)), with: .color(.white.opacity(0.2 + 0.8 * night)))
             }
         }
         // labels try right-up, left-up, right-down, left-down; keep clear of the top text band, bottom line and corner comps
@@ -261,6 +357,7 @@ struct FaceView: View {
         }
         if layer == 2 {
         let amb = FaceView.orange
+        if aod { g.opacity = 0.6 }
 
         // you: position (no marker; borders and top line show it), LOC and HOME distance / bearing (great circle)
         let la = loc.coord.latitude, lo = loc.coord.longitude
@@ -272,8 +369,15 @@ struct FaceView: View {
         g.draw(dl, at: CGPoint(x: c.x, y: 21), anchor: .center) // resolved text has no width limit: always one line
         g.draw(Text(String(format: "%.3f%@ / %07.3f%@%@", abs(la), la >= 0 ? "N" : "S", abs(lo), lo >= 0 ? "E" : "W", loc.live ? "" : " FALLBACK")).font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: size.height - 12))
 
+        // time scrub indicator under the date: orange sign, white offset
+        if abs(scrubH) * 60 >= 1 {
+            let m = Int((abs(scrubH) * 60).rounded()), dd = m / 1440, hh = (m % 1440) / 60, mi = m % 60
+            let body = dd > 0 ? "\(dd)d \(hh)h" : hh > 0 ? "\(hh)h \(String(format: "%02d", mi))m" : "\(mi)m"
+            let f = Font.system(size: 7, weight: .bold, design: .monospaced)
+            g.draw(g.resolve(Text(scrubH > 0 ? "+" : "-").font(f).foregroundColor(amb) + Text(body).font(f).foregroundColor(.white)), at: CGPoint(x: c.x, y: 30), anchor: .center)
+        }
         corners(&g, size, date, sky)
-        for y in stride(from: 0.0, to: size.height, by: 3) { g.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.03))) }
+        if !aod { for y in stride(from: 0.0, to: size.height, by: 3) { g.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.03))) } }
 
         }
     }
@@ -303,6 +407,7 @@ struct FaceView: View {
     // ---- four corner complications ----
     @State private var temp: Int? = nil
     @State private var rain: Int? = nil
+    @State private var rain6: [Int] = []
     @State private var wxAt = Date.distantPast
     @State private var wxOk: Date? = nil
     private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
@@ -384,10 +489,10 @@ struct FaceView: View {
 
     private func fetchTemp(_ c: CLLocationCoordinate2D) {
         wxAt = Date()
-        let u = URL(string: String(format: "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f&current=temperature_2m&hourly=precipitation_probability&forecast_hours=1", c.latitude, c.longitude))!
+        let u = URL(string: String(format: "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f&current=temperature_2m&hourly=precipitation_probability&forecast_hours=6", c.latitude, c.longitude))!
         URLSession.shared.dataTask(with: u) { data, _, _ in
             struct R: Decodable { struct C: Decodable { let temperature_2m: Double }; struct H: Decodable { let precipitation_probability: [Int?] }; let current: C; let hourly: H? }
-            if let data, let r = try? JSONDecoder().decode(R.self, from: data) { DispatchQueue.main.async { temp = Int(r.current.temperature_2m.rounded()); wxOk = Date(); rain = r.hourly?.precipitation_probability.first ?? nil } }
+            if let data, let r = try? JSONDecoder().decode(R.self, from: data) { DispatchQueue.main.async { temp = Int(r.current.temperature_2m.rounded()); wxOk = Date(); let h = (r.hourly?.precipitation_probability ?? []).map { $0 ?? 0 }; rain6 = h; rain = h.first } }
         }.resume()
     }
 }
@@ -396,32 +501,31 @@ struct FaceView: View {
 /// reads it every frame, so no SwiftUI state is written from the sensor callback or the draw path.
 /// deviceMotion gravity when available, raw accelerometer otherwise; low-pass filtered.
 final class Motion {
-    private(set) var tilt: CGPoint = .zero
+    private var raw: CGPoint = .zero, sp: CGPoint = .zero, v: CGPoint = .zero, last: Date? = nil
     private let mm = CMMotionManager()
     private(set) var source = "none"
     func start() {
         #if targetEnvironment(simulator)
         source = "simulator"; return
         #else
-        let k = 0.15
+        // 60 Hz sensor; light pre-filter here, critically damped spring per frame in read()
         let feed: (Double, Double) -> Void = { [weak self] x, y in
             guard let self else { return }
-            let x = max(-1, min(1, x)), y = max(-1, min(1, y))
-            self.tilt = CGPoint(x: self.tilt.x + (x - self.tilt.x) * k, y: self.tilt.y + (y - self.tilt.y) * k) }
+            let x = max(-1, min(1, x)), y = max(-1, min(1, y)), k = 0.35
+            self.raw = CGPoint(x: self.raw.x + (x - self.raw.x) * k, y: self.raw.y + (y - self.raw.y) * k) }
         if mm.isDeviceMotionAvailable {
             guard !mm.isDeviceMotionActive else { return }
-            source = "deviceMotion"; mm.deviceMotionUpdateInterval = 1.0 / 30
+            source = "deviceMotion"; mm.deviceMotionUpdateInterval = 1.0 / 60
             mm.startDeviceMotionUpdates(to: .main) { m, _ in if let gr = m?.gravity { feed(gr.x, gr.y) } }
         } else if mm.isAccelerometerAvailable {
             guard !mm.isAccelerometerActive else { return }
-            source = "accelerometer"; mm.accelerometerUpdateInterval = 1.0 / 30
+            source = "accelerometer"; mm.accelerometerUpdateInterval = 1.0 / 60
             mm.startAccelerometerUpdates(to: .main) { a, _ in if let a = a?.acceleration { feed(a.x, a.y) } }
         }
         print("EnochWatch motion source:", source)
         #endif
     }
-    /// Current tilt, -1...1. Simulator: "-fakeTilt x,y" pins it, otherwise a slow sine so the effect is visible.
-    func read(_ date: Date) -> CGPoint {
+    private func target(_ date: Date) -> CGPoint {
         #if targetEnvironment(simulator)
         let a = ProcessInfo.processInfo.arguments
         if let i = a.firstIndex(of: "-fakeTilt"), i + 1 < a.count {
@@ -430,8 +534,20 @@ final class Motion {
         let t = date.timeIntervalSinceReferenceDate
         return CGPoint(x: 0.6 * sin(t * 0.9), y: 0.5 * cos(t * 0.7))
         #else
-        return tilt
+        return raw
         #endif
+    }
+    /// Smoothed tilt, -1...1: critically damped spring (response 0.4 s) toward the sensor value, no jitter.
+    /// Simulator: "-fakeTilt x,y" pins it, otherwise a slow sine so the effect is visible.
+    func read(_ date: Date) -> CGPoint {
+        let t = target(date)
+        var dt = last.map { date.timeIntervalSince($0) } ?? 1; last = date; dt = min(max(dt, 0), 0.25)
+        if dt >= 0.25 { sp = t; v = .zero; return sp }
+        let w = 2 * Double.pi / 0.4, n = max(1, Int(ceil(dt / (1.0 / 240)))), h = dt / Double(n)
+        for _ in 0..<n {
+            v.x += (-w * w * (sp.x - t.x) - 2 * w * v.x) * h; v.y += (-w * w * (sp.y - t.y) - 2 * w * v.y) * h
+            sp.x += v.x * h; sp.y += v.y * h }
+        return sp
     }
     func stop() { mm.stopDeviceMotionUpdates(); mm.stopAccelerometerUpdates() }
 }
@@ -440,13 +556,15 @@ final class Motion {
 final class ZoomSpring {
     private(set) var x: Double = 1
     private var v: Double = 0, t: Double = 1, last: Date? = nil
+    private let resp: Double, damp: Double
+    init(response: Double = 0.35, damping: Double = 0.65) { resp = response; damp = damping; x = 1 }
     var moving: Bool { abs(v) > 0.002 || abs(x - t) > 0.001 }
     func reset(_ z: Double) { x = z; t = z; v = 0; last = nil }
     @discardableResult func step(to target: Double, at now: Date) -> Double {
         t = target
         var dt = last.map { now.timeIntervalSince($0) } ?? 0; last = now
         dt = min(max(dt, 0), 0.1)
-        let w = 2 * Double.pi / 0.35, z = 0.65, n = max(1, Int(ceil(dt / (1.0 / 240))))
+        let w = 2 * Double.pi / resp, z = damp, n = max(1, Int(ceil(dt / (1.0 / 240))))
         let h = dt / Double(n)
         for _ in 0..<n { v += (-w * w * (x - t) - 2 * z * w * v) * h; x += v * h }
         if !moving { x = t; v = 0 }
@@ -488,7 +606,8 @@ struct DigitsShape: Shape {
 /// lensing, adaptive tint and light-following rim itself. No extra shadows, strokes or fills.
 struct GlassTime: View {
     let date: Date
-    var tilt: CGPoint = .zero // low-pass filtered gravity x/y, -1...1
+    var tilt: CGPoint = .zero // smoothed gravity x/y, -1...1
+    var aod = false
     var body: some View {
         GeometryReader { geo in
             let cal = Calendar.current
@@ -497,6 +616,10 @@ struct GlassTime: View {
             let shape = DigitsShape(hh: hh, mm: mm, fs: fs)
             // Liquid Glass, clear variant: no white fill; the system lenses and refracts the map through the glyphs.
             // Thin specular rim: bright top-left, faint bottom-right.
+            if aod {
+                // always-on: thin dim outline only, no glass, no light
+                shape.stroke(Color.white.opacity(0.55), lineWidth: 1).frame(width: geo.size.width, height: geo.size.height)
+            } else {
             ZStack {
                 if #available(watchOS 26.0, *) {
                     Color.clear.glassEffect(.clear, in: shape)
@@ -517,8 +640,7 @@ struct GlassTime: View {
                     .blendMode(.plusLighter)
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            // parallax: digits float above the map, up to 6 pt
-            .offset(x: tilt.x * 6, y: -tilt.y * 6)
+            } // parallax offset is applied by FaceView (depth layers)
         }
         .allowsHitTesting(false)
     }
