@@ -106,6 +106,8 @@ struct FaceView: View {
             withAnimation(.easeInOut(duration: 0.3)) { zoom = zoom < (1 + fillZoom) / 2 ? fillZoom : 1 }
         }
         .background(Color.black)
+        .toolbar(.hidden, for: .navigationBar)
+        .persistentSystemOverlays(.hidden)
     }
 
     private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ layer: Int) {
@@ -126,18 +128,12 @@ struct FaceView: View {
             // original map, natural colours; lighting below only changes exposure
             l.draw(Image("disc"), in: disc)
             // night side: solar elevation on the globe, sampled on a coarse grid
-            let n = 72, cell = 2 * R / Double(n), sl = sky.sunLat * d, so = sky.sunLon * d
-            for j in 0..<n { for i in 0..<n {
-                let dx = (Double(i) + 0.5) / Double(n) * 2 - 1, dy = (Double(j) + 0.5) / Double(n) * 2 - 1, r = hypot(dx, dy)
-                if r > 1.03 { continue }
-                let la = (90 - min(r, 1) * 180) * d, lo = atan2(dx, dy)
-                let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
-                // sun's spotlight, feathered: smoothstep over sun elevation -12 deg (sin -0.208) to +6 deg (sin 0.105)
-                var t = min(1, max(0, (e + 0.309) / 0.517)); t = t * t * (3 - 2 * t)
-                let cellR = Path(CGRect(x: disc.minX + Double(i) * cell, y: disc.minY + Double(j) * cell, width: cell + 0.5, height: cell + 0.5))
-                if t < 1 { l.blendMode = .normal; l.fill(cellR, with: .color(.black.opacity(0.9 * (1 - t)))) } // night: ~10% exposure, near black
-                if t > 0 { l.blendMode = .screen; l.fill(cellR, with: .color(Color(white: 0.32).opacity(t))); l.blendMode = .normal } // day: neutral exposure lift, no tint
-            } }
+            // smooth shading: per-cell values go into two small bitmaps that are drawn scaled up with
+            // interpolation, so there are no cell squares or seams (filled cells used to overlap into a visible grid)
+            if let sh = Self.shade(n: 64, sunLat: sky.sunLat * d, sunLon: sky.sunLon * d) {
+                l.draw(Image(decorative: sh.0, scale: 1).interpolation(.high), in: disc)
+                l.blendMode = .screen; l.draw(Image(decorative: sh.1, scale: 1).interpolation(.high), in: disc); l.blendMode = .normal
+            }
             // current country (thin orange) and city (thinner orange) boundaries, projected like the map
             let orange = Color(red: 1, green: 0.55, blue: 0.1)
             func ringPath(_ rg: [[Double]]) -> Path { var p = Path()
@@ -214,9 +210,31 @@ struct FaceView: View {
         g.draw(Text(String(format: "%.3f%@ / %07.3f%@%@", abs(la), la >= 0 ? "N" : "S", abs(lo), lo >= 0 ? "E" : "W", loc.live ? "" : " FALLBACK")).font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: size.height - 12))
 
         corners(&g, size, date, sky)
-        for y in stride(from: 0.0, to: size.height, by: 3) { g.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.06))) }
+        for y in stride(from: 0.0, to: size.height, by: 3) { g.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.03))) }
 
         }
+    }
+
+    /// Night (black, alpha 0.9*(1-t)) and day (grey 0.32 screen, alpha t) shading maps over the disc's bounding square.
+    private static func shade(n: Int, sunLat sl: Double, sunLon so: Double) -> (CGImage, CGImage)? {
+        let d = Double.pi / 180
+        var night = [UInt8](repeating: 0, count: n * n * 4), day = [UInt8](repeating: 0, count: n * n * 4)
+        for j in 0..<n { for i in 0..<n {
+            let dx = (Double(i) + 0.5) / Double(n) * 2 - 1, dy = (Double(j) + 0.5) / Double(n) * 2 - 1, r = hypot(dx, dy)
+            let la = (90 - min(r, 1) * 180) * d, lo = atan2(dx, dy)
+            let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
+            var t = min(1, max(0, (e + 0.309) / 0.517)); t = t * t * (3 - 2 * t)
+            let k = (j * n + i) * 4
+            night[k + 3] = UInt8(255 * 0.9 * (1 - t))                     // premultiplied black
+            let a = 255 * t, v = UInt8(a * 0.32); day[k] = v; day[k + 1] = v; day[k + 2] = v; day[k + 3] = UInt8(a)
+        } }
+        func img(_ px: [UInt8]) -> CGImage? {
+            guard let p = CGDataProvider(data: Data(px) as CFData) else { return nil }
+            return CGImage(width: n, height: n, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: n * 4, space: CGColorSpaceCreateDeviceRGB(),
+                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue), provider: p, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        }
+        guard let a = img(night), let b = img(day) else { return nil }
+        return (a, b)
     }
 
     // ---- four corner complications ----
@@ -330,7 +348,7 @@ struct FaceView: View {
     }
 }
 
-@main struct EnochWatchApp: App { var body: some Scene { WindowGroup { FaceView() } } }
+@main struct EnochWatchApp: App { var body: some Scene { WindowGroup { FaceView().ignoresSafeArea() } } }
 
 /// Stacked HH over MM, as large as fits between the corners, in a translucent "Liquid Glass" style:
 /// the map shows through the glyphs. watchOS 26+: real .glassEffect masked by the digits; earlier: .ultraThinMaterial.
