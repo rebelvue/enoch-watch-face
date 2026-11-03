@@ -166,9 +166,9 @@ function draw(){var now=new Date(Date.now()+TOFF+SCS),S=sky(now.getTime());R=R0*
  var dm=g.createRadialGradient(CX,CY,0,CX,CY,R*1.03);dm.addColorStop(0,'rgba(190,240,210,.03)');dm.addColorStop(.75,'rgba(190,240,210,.07)');dm.addColorStop(1,'rgba(200,235,215,.32)');
  if(!AOD){g.fillStyle=dm;g.fillRect(CX-R,CY-R,2*R,2*R);}
  g.restore();
- if(AOD){g.fillStyle='rgba(0,0,0,.86)';g.beginPath();g.arc(CX,CY,R,0,7);g.fill();}
+ if(AOD){g.fillStyle='rgba(0,0,0,.35)';g.beginPath();g.arc(CX,CY,R,0,7);g.fill();} // always-on: same day/night shading, only about 0.65x brightness
  if(!AOD){g.strokeStyle='rgba(220,245,230,.9)';g.lineWidth=1.2;g.beginPath();g.arc(CX,CY,R,0,7);g.stroke();}
- if(!AOD){
+ {
  // tactical overlay: range rings (every 30 deg of latitude), radials, rim ticks with labels
  g.save();g.beginPath();g.arc(CX,CY,R,0,7);g.clip();g.strokeStyle='rgba(191,245,210,.22)';g.lineWidth=.8;
  [60,30,0,-30,-60].forEach(function(la){g.beginPath();g.arc(CX,CY,(90-la)/180*R,0,7);g.stroke();});

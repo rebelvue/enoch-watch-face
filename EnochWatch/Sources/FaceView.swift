@@ -170,13 +170,12 @@ struct FaceView: View {
         ZStack {
             // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon, comps and text
             // always-on: everything greyscale and flat, except the sun and moon (layer 5, full colour)
-            let gs = aod ? 0.0 : 1.0
-            Canvas { g, size in draw(&g, size, date, 0) }.saturation(gs)
-            GlassTime(date: date, tilt: tilt, aod: aod).offset(Self.px(tilt, 11)).saturation(gs).zIndex(1)
-            Canvas { g, size in draw(&g, size, date, 3) }.offset(Self.px(tilt, 6)).saturation(gs).zIndex(2).allowsHitTesting(false)
-            Canvas { g, size in draw(&g, size, date, 1) }.offset(Self.px(tilt, 4)).saturation(gs).zIndex(3).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 0) }.aodGrey(aod)
+            GlassTime(date: date, tilt: tilt, aod: aod).offset(Self.px(tilt, 11)).aodGrey(aod).zIndex(1)
+            Canvas { g, size in draw(&g, size, date, 3) }.offset(Self.px(tilt, 6)).aodGrey(aod).zIndex(2).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 1) }.offset(Self.px(tilt, 4)).aodGrey(aod).zIndex(3).allowsHitTesting(false)
             if aod { Canvas { g, size in draw(&g, size, date, 5) }.zIndex(3.5).allowsHitTesting(false) }
-            Canvas { g, size in draw(&g, size, date, 2, off) }.offset(Self.px(tilt, 3)).saturation(gs).zIndex(4).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 2, off) }.offset(Self.px(tilt, 3)).aodGrey(aod).zIndex(4).allowsHitTesting(false)
             if let k = detail { card(k, date).zIndex(5) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -289,7 +288,8 @@ struct FaceView: View {
         }
 
         // always-on: map dimmed heavily, no radar overlay
-        if aod { g.fill(Path(ellipseIn: disc), with: .color(.black.opacity(0.86))); return } // mostly black for OLED; flat: no rim light
+        // always-on: keep the active day/night shading and grid, just about 0.65x brightness (greyscale comes from .saturation(0))
+        if aod { g.fill(Path(ellipseIn: disc), with: .color(.black.opacity(0.35))) }: no rim light
         // tactical overlay: range rings, radials, rim ticks
         let acc = Color(red: 0.75, green: 0.96, blue: 0.82)
         g.drawLayer { l in
@@ -667,4 +667,11 @@ struct GlassTime: View {
         }
         .allowsHitTesting(false)
     }
+}
+
+
+/// Always-on only: greyscale. In active mode the view is returned untouched (no saturation pass at all),
+/// so the wrist-up face is exactly the full-colour render.
+extension View {
+    @ViewBuilder func aodGrey(_ on: Bool) -> some View { if on { self.saturation(0) } else { self } }
 }

@@ -59,7 +59,7 @@ These are the same low-precision formulas the main map uses, accurate to about 0
   - skips weather fetches and refreshes on wake,
   - runs no springs or animations, and skips the crown, scrub and detail-card timers,
   - reuses the cached day/night shading render (rebuilt only when the sun moves about 0.25 deg),
-  - dims the map to mostly black for OLED.
+  - keeps the same day/night shading, map and grid as active mode, only at about 0.65x brightness, so the night side stays visible in grey.
 - The web preview also drops to one redraw a minute and pauses tilt, springs and weather.
 
 ## Detail cards
