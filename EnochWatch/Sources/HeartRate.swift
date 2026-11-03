@@ -34,4 +34,7 @@ final class HeartRate: ObservableObject {
         q.updateHandler = handler
         query = q; store.execute(q)
     }
+    /// Always-on: stop the live query and keep the last value; resume on wake.
+    func pause() { if let q = query { store.stop(q); query = nil } }
+    func resume() { guard query == nil, HKHealthStore.isHealthDataAvailable(), let t = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return }; start(t) }
 }

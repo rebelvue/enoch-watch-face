@@ -108,18 +108,22 @@ struct FaceView: View {
             if aod { TimelineView(.everyMinute) { ctx in face(ctx.date) } }
             else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : 1.0 / 30)) { ctx in face(ctx.date) } }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
         .ignoresSafeArea()
         // crown attached to a concrete, framed, focused view (avoids "Crown Sequencer was set up without a view property")
         .focusable(true)
         .focused($crownFocus)
-        .digitalCrownRotation($crown, from: -1e7, through: 1e7, by: 0.01, sensitivity: .medium,
+        .digitalCrownRotation($crown, from: -1000, through: 1000, by: 0.1, sensitivity: .medium,
                               isContinuous: true, isHapticFeedbackEnabled: true)
         .onChange(of: crown) { old, v in
             let now = Date(), dt = max(0.016, now.timeIntervalSince(crownAt)); crownAt = now; fast = true
             if detail != nil { detail = nil; return }
             if aod { return }
             // acceleration curve: slow turn = minutes, fast spin = hours, very fast = days
-            let dv = v - old, speed = abs(dv) / dt
+            // bounded range (a huge range / tiny step made SwiftUI allocate ~2e9 detents and crash); ignore the wrap jump
+            let dv = v - old; if !dv.isFinite || abs(dv) > 500 { return }
+            let speed = abs(dv) / dt
             let hoursPerUnit = min(12, 0.17 * (1 + pow(speed, 1.6) * 0.6))
             scrub = max(-720, min(720, scrub + dv * hoursPerUnit))
         }
@@ -132,6 +136,7 @@ struct FaceView: View {
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 100_000_000)
+                if aod { continue }
                 let now = Date()
                 if scrub != 0 && now.timeIntervalSince(crownAt) > 2 { scrub = 0 }
                 if detail != nil && now.timeIntervalSince(detailAt) > 6 { detail = nil }
@@ -141,9 +146,9 @@ struct FaceView: View {
         }
         .background(Color.black)
         .onAppear { zt = min(fillZoom, max(1, zoom)); zs.reset(zt); if !aod { motion.start() }; crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
-        .onChange(of: aod) { _, v in if v { motion.stop(); scrub = 0; detail = nil } else { motion.start() } }
+        .onChange(of: aod) { _, v in if v { motion.stop(); hr.pause(); scrub = 0; detail = nil } else { motion.start(); hr.resume(); fetchTemp(loc.coord) } }
         // weather fetch lives outside the draw path: every 12 min, and when the location moves
-        .task { while !Task.isCancelled { fetchTemp(loc.coord); try? await Task.sleep(nanoseconds: 720_000_000_000) } }
+        .task { while !Task.isCancelled { if !aod { fetchTemp(loc.coord) }; try? await Task.sleep(nanoseconds: 720_000_000_000) } }
         .onChange(of: loc.live) { _ in fetchTemp(loc.coord) }
         .onDisappear { motion.stop() }
         .toolbar(.hidden, for: .navigationBar)
@@ -163,11 +168,14 @@ struct FaceView: View {
         let date = now.addingTimeInterval(off * 3600)
         ZStack {
             // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon, comps and text
-            Canvas { g, size in draw(&g, size, date, 0) }
-            GlassTime(date: date, tilt: tilt, aod: aod).offset(Self.px(tilt, 11)).zIndex(1)
-            Canvas { g, size in draw(&g, size, date, 3) }.offset(Self.px(tilt, 6)).zIndex(2).allowsHitTesting(false)
-            Canvas { g, size in draw(&g, size, date, 1) }.offset(Self.px(tilt, 4)).zIndex(3).allowsHitTesting(false)
-            Canvas { g, size in draw(&g, size, date, 2, off) }.offset(Self.px(tilt, 3)).zIndex(4).allowsHitTesting(false)
+            // always-on: everything greyscale and flat, except the sun and moon (layer 5, full colour)
+            let gs = aod ? 0.0 : 1.0
+            Canvas { g, size in draw(&g, size, date, 0) }.saturation(gs)
+            GlassTime(date: date, tilt: tilt, aod: aod).offset(Self.px(tilt, 11)).saturation(gs).zIndex(1)
+            Canvas { g, size in draw(&g, size, date, 3) }.offset(Self.px(tilt, 6)).saturation(gs).zIndex(2).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 1) }.offset(Self.px(tilt, 4)).saturation(gs).zIndex(3).allowsHitTesting(false)
+            if aod { Canvas { g, size in draw(&g, size, date, 5) }.zIndex(3.5).allowsHitTesting(false) }
+            Canvas { g, size in draw(&g, size, date, 2, off) }.offset(Self.px(tilt, 3)).saturation(gs).zIndex(4).allowsHitTesting(false)
             if let k = detail { card(k, date).zIndex(5) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -270,15 +278,17 @@ struct FaceView: View {
                 l.draw(Image(decorative: sh.0, scale: 1).interpolation(.high), in: disc)
                 l.blendMode = .screen; l.draw(Image(decorative: sh.1, scale: 1).interpolation(.high), in: disc); l.blendMode = .normal
             }
+            if !aod {
             // firmament dome from above: clear crown, pale blue sheen at the rim resting on the ice wall
             l.fill(Path(ellipseIn: disc), with: .radialGradient(Gradient(stops: [
                 .init(color: Color(red: 0.75, green: 0.94, blue: 0.82).opacity(0.03), location: 0),
                 .init(color: Color(red: 0.75, green: 0.94, blue: 0.82).opacity(0.07), location: 0.75),
                 .init(color: Color(red: 0.78, green: 0.92, blue: 0.84).opacity(0.32), location: 1)]), center: c, startRadius: 0, endRadius: R * 1.03))
+            }
         }
 
         // always-on: map dimmed heavily, no radar overlay
-        if aod { g.fill(Path(ellipseIn: disc), with: .color(.black.opacity(0.78))); g.stroke(Path(ellipseIn: disc), with: .color(.white.opacity(0.35)), lineWidth: 0.8); return }
+        if aod { g.fill(Path(ellipseIn: disc), with: .color(.black.opacity(0.86))); return } // mostly black for OLED; flat: no rim light
         // tactical overlay: range rings, radials, rim ticks
         let acc = Color(red: 0.75, green: 0.96, blue: 0.82)
         g.drawLayer { l in
@@ -308,10 +318,10 @@ struct FaceView: View {
             for rg in borders.city { l.stroke(ringPath(rg), with: .color(orange.opacity(0.9)), lineWidth: 0.5) }
         }
         }
-        if layer == 1 {
+        if layer == 1 || layer == 5 {
         let disc = CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R), sl = sky.sunLat * d, so = sky.sunLon * d
         if aod { g.opacity = 0.45 }
-        g.drawLayer { l in
+        if layer == 1 { g.drawLayer { l in
             l.clip(to: Path(ellipseIn: disc))
             // real stars over the ground point lat = Dec, lon = RA - GST (same as sun and moon); faint by day
             for st in stars {
@@ -322,7 +332,10 @@ struct FaceView: View {
                 let p = CGPoint(x: c.x + r * R * sin(lo), y: c.y + r * R * cos(lo))
                 l.fill(Path(ellipseIn: CGRect(x: p.x - 0.5, y: p.y - 0.5, width: 1, height: 1)), with: .color(.white.opacity(0.2 + 0.8 * night)))
             }
-        }
+        } }
+        // always-on: sun and moon are drawn in their own full-colour layer (5) above the greyscale layers
+        if aod == (layer == 5) {
+        g.opacity = 1
         // labels try right-up, left-up, right-down, left-down; keep clear of the top text band, bottom line and corner comps
         func tag(_ p: CGPoint, _ t: String, _ col: Color) {
             let rt = g.resolve(Text(t).font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundColor(col))
@@ -355,6 +368,7 @@ struct FaceView: View {
             g.draw(Image(decorative: img, scale: 1), in: CGRect(x: mp.x - mr, y: mp.y - mr, width: 2 * mr, height: 2 * mr)) }
         _ = amb
         }
+        }
         if layer == 2 {
         let amb = FaceView.orange
         if aod { g.opacity = 0.6 }
@@ -383,7 +397,15 @@ struct FaceView: View {
     }
 
     /// Night (black, alpha 0.9*(1-t)) and day (grey 0.32 screen, alpha t) shading maps over the disc's bounding square.
+    /// Day/night shading cache: rebuilt only when the sun moves about 0.25 deg (once a minute or so; always-on reuses it).
+    private static var shadeCache: (key: String, img: (CGImage, CGImage))?
     private static func shade(n: Int, sunLat sl: Double, sunLon so: Double) -> (CGImage, CGImage)? {
+        guard sl.isFinite, so.isFinite, n > 0, n <= 256 else { return nil }
+        let key = "\(n):\(Int((sl * 229.18).rounded())):\(Int((so * 229.18).rounded()))"
+        if let c = shadeCache, c.key == key { return c.img }
+        let r = shadeBuild(n: n, sunLat: sl, sunLon: so); if let r { shadeCache = (key, r) }; return r
+    }
+    private static func shadeBuild(n: Int, sunLat sl: Double, sunLon so: Double) -> (CGImage, CGImage)? {
         let d = Double.pi / 180
         var night = [UInt8](repeating: 0, count: n * n * 4), day = [UInt8](repeating: 0, count: n * n * 4)
         for j in 0..<n { for i in 0..<n {
