@@ -76,6 +76,7 @@ struct FaceView: View {
     @StateObject private var hr = HeartRate()
     @StateObject private var motion = Motion()
     // map zoom: 1 = whole disc, fillZoom = disc covers the whole screen (radius = half the diagonal)
+    @FocusState private var crownFocus: Bool
     @AppStorage("enochZoom") private var zoom: Double = 1
     private let fillZoom: Double = {
         let b = WKInterfaceDevice.current().screenBounds.size
@@ -98,9 +99,13 @@ struct FaceView: View {
                 Canvas { g, size in draw(&g, size, ctx.date, 1) }.zIndex(2).allowsHitTesting(false)
                 Canvas { g, size in draw(&g, size, ctx.date, 2) }.zIndex(3).allowsHitTesting(false)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
         }
         .ignoresSafeArea()
-        .focusable()
+        // crown attached to a concrete, framed, focused view (avoids "Crown Sequencer was set up without a view property")
+        .focusable(true)
+        .focused($crownFocus)
         .digitalCrownRotation($zoom, from: 1, through: fillZoom, by: 0.02, sensitivity: .low,
                               isContinuous: false, isHapticFeedbackEnabled: true)
         .onChange(of: zoom) { z in
@@ -110,7 +115,10 @@ struct FaceView: View {
             withAnimation(.easeInOut(duration: 0.3)) { zoom = zoom < (1 + fillZoom) / 2 ? fillZoom : 1 }
         }
         .background(Color.black)
-        .onAppear { motion.start() }
+        .onAppear { motion.start(); crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
+        // weather fetch lives outside the draw path: every 12 min, and when the location moves
+        .task { while !Task.isCancelled { fetchTemp(loc.coord); try? await Task.sleep(nanoseconds: 720_000_000_000) } }
+        .onChange(of: loc.live) { _ in fetchTemp(loc.coord) }
         .onDisappear { motion.stop() }
         .toolbar(.hidden, for: .navigationBar)
         .persistentSystemOverlays(.hidden)
@@ -326,9 +334,8 @@ struct FaceView: View {
         // bottom-left: rain chance (Open-Meteo, free, no key); amber when older than 20 min
         let stale = wxOk.map { date.timeIntervalSince($0) > 1200 } ?? false
         chip(&g, size, deg: 126, leading: true, .rain, rain.map { "\($0)%" } ?? "--", stale ? FaceView.amber : .white)
-        if date.timeIntervalSince(wxAt) > 720 { DispatchQueue.main.async { fetchTemp(me) } }
         // bottom-right: watch battery (segments, bolt while charging, red below 20%)
-        let dev = WKInterfaceDevice.current(); dev.isBatteryMonitoringEnabled = true
+        let dev = WKInterfaceDevice.current()
         let b = Double(dev.batteryLevel), chg = dev.batteryState == .charging || dev.batteryState == .full
         chip(&g, size, deg: 54, leading: false, .battery(level: b, charging: chg), b < 0 ? "--" : "\(Int(b * 100))%", b >= 0 && b < 0.2 ? FaceView.alert : .white)
     }
