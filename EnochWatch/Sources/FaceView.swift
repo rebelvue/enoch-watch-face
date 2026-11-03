@@ -251,13 +251,13 @@ struct FaceView: View {
         g.fill(Path(ellipseIn: CGRect(x: sp.x - 4.5, y: sp.y - 4.5, width: 9, height: 9)), with: .radialGradient(Gradient(stops: [
             .init(color: .white, location: 0), .init(color: Color(red: 1, green: 0.96, blue: 0.86), location: 0.55), .init(color: Color(red: 1, green: 0.82, blue: 0.48), location: 0.85),
             .init(color: Color(red: 0.95, green: 0.6, blue: 0.23), location: 1)]), center: sp, startRadius: 0, endRadius: 4.5))
-        tag(sp, "SUN", amb)
+        // no SUN/MOON tags (Levi, 2026-11-03)
 
         // moon: NASA LRO nearside texture, sphere-shaded terminator, earthshine and limb darkening
         let mp = P(sky.moonLat, sky.moonLon), mr = 6.0
         if let img = shadedMoon(sky.phase) {
             g.draw(Image(decorative: img, scale: 1), in: CGRect(x: mp.x - mr, y: mp.y - mr, width: 2 * mr, height: 2 * mr)) }
-        tag(mp, "MOON \(Int((1 - cos(sky.phase)) / 2 * 100))%", amb)
+        _ = amb
         }
         if layer == 2 {
         let amb = FaceView.orange

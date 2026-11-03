@@ -188,8 +188,8 @@ function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom
  g.restore();
  // sun: soft lit glow + tactical tag
  var p=P(S.sun[0],S.sun[1]);sunIcon(p[0],p[1]);
- tag(p[0],p[1],'SUN');
- var m=P(S.moon[0],S.moon[1]);moonIcon(m[0],m[1],8,S.ph);tag(m[0],m[1],'MOON '+Math.round((1-Math.cos(S.ph))/2*100)+'%');
+ /* no SUN tag */
+ var m=P(S.moon[0],S.moon[1]);moonIcon(m[0],m[1],8,S.ph);
  if(QP.get('debug')){var ss=P(S.sun[0],S.sun[1]),sm=P(S.moon[0],S.moon[1]);g.save();g.lineWidth=1.5;g.strokeStyle='#f0f';g.beginPath();g.arc(ss[0],ss[1],12,0,7);g.moveTo(ss[0]-16,ss[1]);g.lineTo(ss[0]+16,ss[1]);g.moveTo(ss[0],ss[1]-16);g.lineTo(ss[0],ss[1]+16);g.stroke();
   g.strokeStyle='#0ff';g.beginPath();g.arc(sm[0],sm[1],10,0,7);g.stroke();g.fillStyle='#f0f';g.font='700 8px '+MONO;g.textAlign='center';g.fillText('SUBSOLAR '+S.sun[0].toFixed(1)+','+S.sun[1].toFixed(1),CX,H-46);g.fillStyle='#0ff';g.fillText('SUBLUNAR '+S.moon[0].toFixed(1)+','+S.moon[1].toFixed(1),CX,H-36);g.restore();}
  corners(now,S);
