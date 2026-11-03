@@ -118,12 +118,20 @@ function glassTime(hh,mm){var FS=190,OY=84,w=cv.width,h=cv.height;
   sx.putImageData(out,0,0);
   a.setTransform(1,0,0,1,0,0);a.globalCompositeOperation='source-over';a.clearRect(0,0,w,h);a.imageSmoothingEnabled=true;a.drawImage(glS,0,0,w,h);
   a.setTransform(dpr,0,0,dpr,0,0);a.fillStyle='rgba(255,255,255,.08)';a.fillRect(0,0,W,H);mask(a);
-  // thin crisp rim (~1.2 px inside the glyph): bright top-left, faint bottom-right
-  b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.lineJoin='round';b.lineWidth=2.4;
-  var gr=b.createLinearGradient(CX-FS*.6,CY-OY-FS*.5,CX+FS*.6,CY+OY+FS*.5);gr.addColorStop(0,'rgba(255,255,255,.95)');gr.addColorStop(.5,'rgba(255,255,255,.4)');gr.addColorStop(1,'rgba(255,255,255,.6)');
-  b.strokeStyle=gr;each(b,0,0,b.strokeText);mask(b);
-  a.globalCompositeOperation='source-over';a.setTransform(1,0,0,1,0,0);a.drawImage(gl2,0,0);}
- g.drawImage(gl1,0,0,W,H);}
+ }
+ // thin crisp rim (~1.2 px inside the glyph), redrawn every frame: the light direction follows device tilt / pointer
+ var lx=Math.min(1,Math.max(0,.1-TL.x*.9)),ly=Math.min(1,Math.max(0,.1+TL.y*.9)),gx0=CX-FS*.6,gy0=CY-OY-FS*.5,gw=FS*1.2,gh=OY*2+FS;
+ b.setTransform(dpr,0,0,dpr,0,0);b.globalCompositeOperation='source-over';b.clearRect(0,0,W,H);b.lineJoin='round';b.lineWidth=2.4;
+ var gr=b.createLinearGradient(gx0+gw*lx,gy0+gh*ly,gx0+gw*(1-lx),gy0+gh*(1-ly));gr.addColorStop(0,'rgba(255,255,255,.95)');gr.addColorStop(.5,'rgba(255,255,255,.4)');gr.addColorStop(1,'rgba(255,255,255,.6)');
+ b.strokeStyle=gr;each(b,0,0,b.strokeText);mask(b);
+ // parallax: the glass digits float a few points above the map
+ var px=TL.x*7,py=-TL.y*7;g.drawImage(gl1,px,py,W,H);g.drawImage(gl2,px,py,W,H);}
+// tilt: DeviceOrientation (iOS asks permission on first tap), pointer position on desktop; low-pass filtered, -1..1
+var TL={x:0,y:0},TT={x:0,y:0};
+function onOri(e){if(e.gamma==null)return;TT.x=Math.max(-1,Math.min(1,e.gamma/45));TT.y=Math.max(-1,Math.min(1,-(e.beta-40)/45));}
+if(window.DeviceOrientationEvent){if(typeof DeviceOrientationEvent.requestPermission==='function'){document.addEventListener('click',function ask(){DeviceOrientationEvent.requestPermission().then(function(r){if(r==='granted')window.addEventListener('deviceorientation',onOri);}).catch(function(){});document.removeEventListener('click',ask);});}
+ else window.addEventListener('deviceorientation',onOri);}
+window.addEventListener('pointermove',function(e){if(e.pointerType!=='mouse')return;var r=cv.getBoundingClientRect();TT.x=Math.max(-1,Math.min(1,((e.clientX-r.left)/r.width-.5)*2));TT.y=Math.max(-1,Math.min(1,-((e.clientY-r.top)/r.height-.5)*2));});
 function draw(){var now=new Date(Date.now()+TOFF),S=sky(now.getTime());R=R0*zoom;window.__sky={t:now.getTime(),sun:S.sun,moon:S.moon,gst:S.gst};
  // beyond the ice wall: not outer space, a calm warm neutral (the dome rests on the ice wall)
  g.fillStyle='#000';g.fillRect(0,0,W,H);
@@ -234,23 +242,28 @@ var ICON={
  bat:function(c,lv,chg){var low=lv!=null&&lv<.2,col=low?ALR:ACC;c.strokeStyle=col;c.strokeRect(-11,-5.5,19,11);c.fillStyle=col;c.fillRect(8,-2.5,2.5,5);
   if(lv!=null)for(var k=0;k<4;k++)if(lv>k/4+.02){c.fillRect(-9.2+k*4.3,-3.7,3.3,7.4);}
   if(chg){c.fillStyle=AMB;c.strokeStyle='#000';c.lineWidth=1;poly(c,[[0,-9],[-5,1],[-1,1],[-2,9],[4,-2],[0,-2],[1,-9]],true);c.stroke();c.fill();}}};
-// corner tile: icon + value only, inside angled brackets; icon sits on the outer side
-function ichip(x,y,al,icon,args,val,vcol){g.save();g.font='800 16px '+MONO;var tw=g.measureText(val).width,w=22+6+tw+10,h=30,c=6;
- var x0=al==='left'?x-5:x-w+5,y0=y-h/2,ix=al==='left'?x0+5+11:x0+w-5-11,tx=al==='left'?ix+11+6:ix-11-6;
- g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=4;g.textAlign=al==='left'?'left':'right';g.textBaseline='middle';g.fillStyle=vcol||'#fff';g.fillText(val,tx,y+1);
- g.save();g.translate(ix,y);g.lineWidth=1.6;g.lineJoin='miter';ICON[icon].apply(null,[g].concat(args));g.restore();
- g.shadowBlur=0;g.strokeStyle='rgba(255,255,255,.75)';g.lineWidth=1;g.beginPath();
- [[x0,y0,1,1],[x0+w,y0,-1,1],[x0,y0+h,1,-1],[x0+w,y0+h,-1,-1]].forEach(function(b){g.moveTo(b[0]+b[2]*(c+4),b[1]);g.lineTo(b[0]+b[2]*3,b[1]);g.lineTo(b[0],b[1]+b[3]*3);g.lineTo(b[0],b[1]+b[3]*(c+2));});
+// curved corner complication: icon + value laid along an arc band concentric with the disc, just along its rim.
+// deg = chip centre angle from the screen centre (0 = right, 90 = down); icon on the outer side
+function ichip(deg,al,icon,args,val,vcol){g.save();g.font='800 15px '+MONO;
+ var rm=R0+15,hb=14,t0=deg*D,top=Math.sin(t0)<0,dir=top?1:-1,ws=val.split('').map(function(ch){return g.measureText(ch).width;});
+ var iconL=26,gap=6,pad=10,tl=ws.reduce(function(p,q){return p+q;},0),tot=pad+iconL+gap+tl+pad,span=tot/rm,s0=t0-dir*span/2,p=pad;
+ function place(len,fn){var t=s0+dir*len/rm;g.save();g.translate(CX+rm*Math.cos(t),CY+rm*Math.sin(t));g.rotate(t+dir*Math.PI/2);fn();g.restore();}
+ function txt(){ws.forEach(function(w,k){place(p+w/2,function(){g.textAlign='center';g.textBaseline='middle';g.fillStyle=vcol||'#fff';g.shadowColor='rgba(0,0,0,.9)';g.shadowBlur=4;g.fillText(val[k],0,1);});p+=w;});}
+ function ic(){place(p+iconL/2,function(){g.lineWidth=1.6;g.lineJoin='miter';ICON[icon].apply(null,[g].concat(args));});p+=iconL;}
+ if(al==='left'){ic();p+=gap;txt();}else{txt();p+=gap;ic();}
+ g.strokeStyle='rgba(255,255,255,.75)';g.lineWidth=1;g.beginPath();var tk=9;
+ [[s0,dir],[s0+dir*span,-dir]].forEach(function(e){[rm-hb,rm+hb].forEach(function(r){var a1=e[0]+e[1]*tk/r;g.moveTo(CX+r*Math.cos(e[0]),CY+r*Math.sin(e[0]));g.arc(CX,CY,r,e[0],a1,e[1]<0);});
+  [[rm-hb,rm-hb+6],[rm+hb,rm+hb-6]].forEach(function(q){g.moveTo(CX+q[0]*Math.cos(e[0]),CY+q[0]*Math.sin(e[0]));g.lineTo(CX+q[1]*Math.cos(e[0]),CY+q[1]*Math.sin(e[0]));});});
  g.stroke();g.restore();}
 function corners(now,S){getWx();var se=sunEvent(now,S);
  // top-left: next sunrise (chevron up) or sunset (chevron down) at your position
- ichip(34,58,'left','sun',[se[1]!=='SET'],se[0]);
+ ichip(-126,'left','sun',[se[1]!=='SET'],se[0]);
  // top-right: heart rate. Browsers cannot read heart rate, so no value is shown (watch reads HealthKit)
- ichip(W-34,58,'right','heart',[],'--');
+ ichip(-54,'right','heart',[],'--');
  // bottom-left: chance of rain this hour (amber when the reading is older than 20 min)
- var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;ichip(34,H-44,'left','rain',[],wx.p==null?'--':wx.p+'%',age>20?AMB:null);
+ var age=wx.ok?Math.round((Date.now()-wx.ok)/6e4):0;ichip(126,'left','rain',[],wx.p==null?'--':wx.p+'%',age>20?AMB:null);
  // bottom-right: device battery (Battery API where the browser has it)
- ichip(W-34,H-44,'right','bat',[batt?batt.level:null,batt&&batt.charging],batt?Math.round(batt.level*100)+'%':'--',batt&&batt.level<.2?ALR:null);
+ ichip(54,'right','bat',[batt?batt.level:null,batt&&batt.charging],batt?Math.round(batt.level*100)+'%':'--',batt&&batt.level<.2?ALR:null);
  // top: live place name, then local date; bottom: coordinates
  getPlace();var cd='';if(se[2]){var m=Math.max(0,Math.round((se[2]-now.getTime())/6e4));cd=' \u00b7 SUN'+(se[1]==='RISE'?'RISE':'SET')+' IN '+Math.floor(m/60)+'H'+String(m%60).padStart(2,'0');}
  g.save();g.textAlign='center';g.textBaseline='middle';g.font='800 11px '+MONO;g.fillStyle='#fff';
@@ -259,17 +272,22 @@ function corners(now,S){getWx();var se=sunEvent(now,S);
  g.font='800 9px '+MONO;g.fillStyle='#fff';g.fillText(Math.abs(pos.lat).toFixed(3)+(pos.lat>=0?'N':'S')+' / '+Math.abs(pos.lon).toFixed(3).padStart(7,'0')+(pos.lon>=0?'E':'W')+(pos.src.indexOf('default')===0?' FALLBACK':''),CX,H-11);g.restore();}
 var QP=new URLSearchParams(location.search);if(QP.get('lat')&&QP.get('lon'))pos={lat:+QP.get('lat'),lon:+QP.get('lon'),src:'test override'};
 if(navigator.geolocation&&!QP.get('lat'))navigator.geolocation.watchPosition(function(r){var mv=Math.hypot(r.coords.latitude-pos.lat,r.coords.longitude-pos.lon)>.05;pos={lat:r.coords.latitude,lon:r.coords.longitude,src:'GPS \u00b1'+Math.round(r.coords.accuracy)+' m'};if(mv)wx.at=0;},function(){},{enableHighAccuracy:false,maximumAge:6e4,timeout:2e4});
-function setZoom(z){zoom=Math.min(ZF,Math.max(1,z));localStorage.setItem('enochZoom',zoom);draw();}
-var anim=null;function animTo(t){var z0=zoom,t0=performance.now();cancelAnimationFrame(anim);
- (function step(n){var k=Math.min(1,(n-t0)/280),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;setZoom(z0+(t-z0)*e);if(k<1)anim=requestAnimationFrame(step);})(t0);}
-function toggle(){animTo(zoom<(1+ZF)/2?ZF:1);}
+// spring zoom (response .35 s, damping .85): input sets the target zt, the displayed zoom follows with ease in/out and a soft settle
+var zt=zoom,zv=0,zl=0,zRun=false;
+function setZoom(z){zt=Math.min(ZF,Math.max(1,z));localStorage.setItem('enochZoom',zt);if(!zRun){zRun=true;zl=performance.now();requestAnimationFrame(zStep);}}
+function zStep(n){var dt=Math.min(.05,(n-zl)/1000),w=2*Math.PI/.35,h=1/240;zl=n;
+ while(dt>0){var s=Math.min(h,dt);zv+=(-w*w*(zoom-zt)-2*.85*w*zv)*s;zoom+=zv*s;dt-=s;}
+ if(Math.abs(zoom-zt)<5e-4&&Math.abs(zv)<1e-3){zoom=zt;zv=0;zRun=false;}draw();if(zRun)requestAnimationFrame(zStep);}
+function toggle(){setZoom(zt<(1+ZF)/2?ZF:1);}
 var pinch=null,lastTap=0;
-cv.addEventListener('touchstart',function(e){if(e.touches.length===2){var a=e.touches[0],b=e.touches[1];pinch={d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),z:zoom};e.preventDefault();}
+cv.addEventListener('touchstart',function(e){if(e.touches.length===2){var a=e.touches[0],b=e.touches[1];pinch={d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),z:zt};e.preventDefault();}
  else if(e.touches.length===1){var t=Date.now();if(t-lastTap<300){toggle();e.preventDefault();lastTap=0;}else lastTap=t;}},{passive:false});
 cv.addEventListener('touchmove',function(e){if(pinch&&e.touches.length===2){var a=e.touches[0],b=e.touches[1];setZoom(pinch.z*Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)/pinch.d);}e.preventDefault();},{passive:false});
 cv.addEventListener('touchend',function(e){if(e.touches.length<2)pinch=null;});
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
-cv.addEventListener('wheel',function(e){e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*(e.ctrlKey?.01:.002)));},{passive:false});
+cv.addEventListener('wheel',function(e){e.preventDefault();setZoom(zt*Math.exp(-e.deltaY*(e.ctrlKey?.01:.002)));},{passive:false});
 cv.addEventListener('dblclick',function(e){e.preventDefault();toggle();});
 Promise.all([document.fonts.load("800 20px 'JBM'"),document.fonts.load("italic 700 20px 'CPB'")]).then(draw,draw);draw();setInterval(draw,100);
+// tilt filter at ~30 Hz (redraws ride the 10 Hz loop, plus here when the light is moving)
+setInterval(function(){var dx=(TT.x-TL.x)*.18,dy=(TT.y-TL.y)*.18;TL.x+=dx;TL.y+=dy;if(Math.abs(dx)+Math.abs(dy)>.002&&!zRun)draw();},33);
 </script></body></html>
