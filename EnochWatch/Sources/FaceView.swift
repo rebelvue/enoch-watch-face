@@ -92,7 +92,11 @@ struct FaceView: View {
     private let moonTex: CGImage? = UIImage(named: "moon")?.cgImage
 
     // Digital Crown scrubs time (velocity based); zoom is double-tap only, spring overshoots and settles
-    @Environment(\.isLuminanceReduced) private var aod
+    // always-on: any of luminance reduced, a non-live timeline cadence, or the scene not active (wrist down)
+    @Environment(\.isLuminanceReduced) private var lum
+    @Environment(\.scenePhase) private var phase
+    @State private var lowCadence = false
+    private var aod: Bool { lum || lowCadence || phase != .active }
     @State private var crown: Double = 0
     @State private var zt: Double = 1                       // zoom target
     @State private var zs = ZoomSpring()
@@ -104,10 +108,14 @@ struct FaceView: View {
     @State private var detailAt = Date.distantPast
     enum Comp { case sun, bpm, rain, battery }
 
+    private func setCadence(_ c: TimelineViewDefaultContext.Cadence) {
+        let low = c != .live; if low != lowCadence { lowCadence = low; logAOD(c) } }
+    private func logAOD(_ c: Any? = nil) { print("AOD flag changed: lum=\(lum) cadence=\(c.map { "\($0)" } ?? (lowCadence ? "low" : "live")) phase=\(phase) -> aod=\(aod)") }
+
     var body: some View {
         Group {
-            if aod { TimelineView(.everyMinute) { ctx in face(ctx.date) } }
-            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : 1.0 / 30)) { ctx in face(ctx.date) } }
+            if aod { TimelineView(.everyMinute) { ctx in face(ctx.date).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
+            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : 1.0 / 30)) { ctx in face(ctx.date).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -147,6 +155,8 @@ struct FaceView: View {
         }
         .background(Color.black)
         .onAppear { zt = min(fillZoom, max(1, zoom)); zs.reset(zt); if !aod { motion.start() }; crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
+        .onChange(of: lum) { logAOD() }
+        .onChange(of: phase) { logAOD() }
         .onChange(of: aod) { _, v in if v { motion.stop(); hr.pause(); scrub = 0; detail = nil } else { motion.start(); hr.resume(); fetchTemp(loc.coord) } }
         // weather fetch lives outside the draw path: every 12 min, and when the location moves
         .task { while !Task.isCancelled { if !aod { fetchTemp(loc.coord) }; try? await Task.sleep(nanoseconds: 720_000_000_000) } }
