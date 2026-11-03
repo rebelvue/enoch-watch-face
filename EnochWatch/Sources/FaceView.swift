@@ -147,9 +147,9 @@ struct FaceView: View {
             for rg in borders.city { l.stroke(ringPath(rg), with: .color(orange.opacity(0.9)), lineWidth: 0.5) }
             // firmament dome from above: clear crown, pale blue sheen at the rim resting on the ice wall
             l.fill(Path(ellipseIn: disc), with: .radialGradient(Gradient(stops: [
-                .init(color: Color(red: 0.55, green: 0.75, blue: 1).opacity(0.05), location: 0),
-                .init(color: Color(red: 0.63, green: 0.78, blue: 1).opacity(0.12), location: 0.75),
-                .init(color: Color(red: 0.8, green: 0.9, blue: 1).opacity(0.5), location: 1)]), center: c, startRadius: 0, endRadius: R))
+                .init(color: Color(red: 0.75, green: 0.94, blue: 0.82).opacity(0.03), location: 0),
+                .init(color: Color(red: 0.75, green: 0.94, blue: 0.82).opacity(0.07), location: 0.75),
+                .init(color: Color(red: 0.78, green: 0.92, blue: 0.84).opacity(0.32), location: 1)]), center: c, startRadius: 0, endRadius: R * 1.03))
         }
 
         // tactical overlay: range rings, radials, rim ticks
@@ -180,8 +180,19 @@ struct FaceView: View {
                 l.fill(Path(ellipseIn: CGRect(x: p.x - rad, y: p.y - rad, width: 2 * rad, height: 2 * rad)), with: .color(col.opacity(min(1, (0.15 + 0.85 * night) * (1.15 - st[2] * 0.18)))))
             }
         }
+        // labels try right-up, left-up, right-down, left-down; keep clear of the top text band, bottom line and corner comps
         func tag(_ p: CGPoint, _ t: String, _ col: Color) {
-            g.draw(Text(t).font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundColor(col), at: CGPoint(x: p.x + 10, y: p.y - 10), anchor: .leading) }
+            let rt = g.resolve(Text(t).font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundColor(col))
+            let w = rt.measure(in: CGSize(width: 200, height: 20)).width, W = size.width, H = size.height
+            let ko = [CGRect(x: 0, y: 0, width: W, height: 28), CGRect(x: 0, y: H - 20, width: W, height: 20),
+                      CGRect(x: 0, y: 0, width: 68, height: 72), CGRect(x: W - 72, y: 0, width: 72, height: 92),
+                      CGRect(x: 0, y: H - 64, width: 68, height: 64), CGRect(x: W - 68, y: H - 64, width: 68, height: 64)]
+            let opts = [CGPoint(x: p.x + 9, y: p.y - 9), CGPoint(x: p.x - 9 - w, y: p.y - 9), CGPoint(x: p.x + 9, y: p.y + 9), CGPoint(x: p.x - 9 - w, y: p.y + 9)]
+            var o = CGPoint(x: min(W - 4 - w, max(4, p.x + 9)), y: min(H - 26, max(34, p.y - 9)))
+            for q in opts where q.x >= 2 && q.x + w <= W - 2 {
+                let r = CGRect(x: q.x, y: q.y - 5, width: w, height: 10)
+                if !ko.contains(where: { $0.intersects(r) }) { o = q; break } }
+            g.draw(rt, at: o, anchor: .leading) }
         // sun: warm corona bloom, anamorphic streak, white-hot limb-darkened photosphere
         let amb = Color(red: 1, green: 0.69, blue: 0.23), sp = P(sky.sunLat, sky.sunLon)
         var sg = g; sg.blendMode = .plusLighter
@@ -209,8 +220,9 @@ struct FaceView: View {
 
         // top: live place name, then local date; bottom: coordinates
         let dfm = DateFormatter(); dfm.locale = Locale(identifier: "en_US_POSIX"); dfm.dateFormat = "EEE dd MMM yyyy"
-        g.draw(Text(loc.place ?? "SANTANDREI, ROMANIA").font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: 10))
-        g.draw(Text(dfm.string(from: date).uppercased()).font(.system(size: 7, weight: .bold, design: .monospaced)).foregroundColor(amb), at: CGPoint(x: c.x, y: 20))
+        g.draw(g.resolve(Text(loc.place ?? "SANTANDREI, ROMANIA").font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white)), at: CGPoint(x: c.x, y: 11), anchor: .center)
+        let dl = g.resolve(Text(dfm.string(from: date).uppercased()).font(.system(size: 7, weight: .bold, design: .monospaced)).foregroundColor(amb))
+        g.draw(dl, at: CGPoint(x: c.x, y: 21), anchor: .center) // resolved text has no width limit: always one line
         g.draw(Text(String(format: "%.3f%@ / %07.3f%@%@", abs(la), la >= 0 ? "N" : "S", abs(lo), lo >= 0 ? "E" : "W", loc.live ? "" : " FALLBACK")).font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundColor(.white), at: CGPoint(x: c.x, y: size.height - 12))
 
         corners(&g, size, date, sky)
@@ -229,8 +241,8 @@ struct FaceView: View {
             let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
             var t = min(1, max(0, (e + 0.309) / 0.517)); t = t * t * (3 - 2 * t)
             let k = (j * n + i) * 4
-            night[k + 3] = UInt8(255 * 0.9 * (1 - t))                     // premultiplied black
-            let a = 255 * t, v = UInt8(a * 0.32); day[k] = v; day[k + 1] = v; day[k + 2] = v; day[k + 3] = UInt8(a)
+            night[k + 3] = UInt8(255 * 0.93 * (1 - t))                   // premultiplied black
+            let a = 255 * t, v = UInt8(a * 0.12); day[k] = v; day[k + 1] = v; day[k + 2] = v; day[k + 3] = UInt8(a)
         } }
         func img(_ px: [UInt8]) -> CGImage? {
             guard let p = CGDataProvider(data: Data(px) as CFData) else { return nil }
@@ -253,62 +265,37 @@ struct FaceView: View {
     private static let mint = Color(red: 0.75, green: 0.96, blue: 0.82), amber = Color(red: 1, green: 0.69, blue: 0.23), alert = Color(red: 1, green: 0.29, blue: 0.24)
     private func poly(_ o: CGPoint, _ pts: [(Double, Double)], close: Bool = true) -> Path {
         var p = Path(); p.addLines(pts.map { CGPoint(x: o.x + $0.0, y: o.y + $0.1) }); if close { p.closeSubpath() }; return p }
+    /// SF Symbols (Apple, licensed for use in apps on Apple platforms), always orange like the borders; red only in alert states.
     private func drawIcon(_ g: inout GraphicsContext, _ icon: Icon, _ o: CGPoint, alertOn: Bool = false) {
-        let m = FaceView.mint, a = FaceView.amber
+        let orange = Color(red: 1, green: 0.55, blue: 0.1)
+        var name = "", col = alertOn ? FaceView.alert : orange
         switch icon {
-        case .sun(let up):
-            var s = Path(); s.addArc(center: CGPoint(x: o.x + 8, y: o.y + 12), radius: 4.5, startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false); s.closeSubpath()
-            g.fill(s, with: .color(a))
-            for k in 0..<5 { let t = Double.pi * (1 + Double(k) / 4); g.stroke(poly(o, [(8 + 6.5 * cos(t), 12 + 6.5 * sin(t)), (8 + 8.5 * cos(t), 12 + 8.5 * sin(t))], close: false), with: .color(a), lineWidth: 1.2) }
-            g.stroke(poly(o, [(0, 12.5), (16, 12.5)], close: false), with: .color(m), lineWidth: 1.4)
-            g.stroke(poly(o, up ? [(5, 3), (8, 0), (11, 3)] : [(5, 0), (8, 3), (11, 0)], close: false), with: .color(m), lineWidth: 1.4)
-        case .heart:
-            let c = alertOn ? FaceView.alert : m
-            g.stroke(poly(o, [(8, 15), (1, 8), (1, 4), (4, 1), (8, 4), (12, 1), (15, 4), (15, 8)]), with: .color(c), lineWidth: 1.4)
-            g.stroke(poly(o, [(2, 8.5), (5.5, 8.5), (7, 5), (9, 12), (10.5, 8.5), (14, 8.5)], close: false), with: .color(alertOn ? c : a), lineWidth: 1.3)
-        case .rain:
-            g.stroke(poly(o, [(8, 0), (13.5, 8), (13.5, 11), (11, 15), (5, 15), (2.5, 11), (2.5, 8)]), with: .color(m), lineWidth: 1.4)
-            g.stroke(poly(o, [(5.5, 10), (6, 12.5), (8, 13)], close: false), with: .color(a), lineWidth: 1.2)
+        case .sun(let up): name = up ? "sunrise.fill" : "sunset.fill"
+        case .heart: name = "heart.fill"
+        case .rain: name = "drop.fill"
         case .battery(let lv, let chg):
-            let c = lv >= 0 && lv < 0.2 ? FaceView.alert : m
-            g.stroke(poly(o, [(0, 3), (14, 3), (14, 13), (0, 13)]), with: .color(c), lineWidth: 1.3)
-            g.fill(Path(CGRect(x: o.x + 14.5, y: o.y + 6, width: 1.8, height: 4)), with: .color(c))
-            let n = lv < 0 ? 0 : Int((lv * 4).rounded(.up))
-            for k in 0..<n { g.fill(Path(CGRect(x: o.x + 2 + Double(k) * 3, y: o.y + 5, width: 2.2, height: 6)), with: .color(c)) }
-            if chg { g.fill(poly(o, [(8.5, 0), (4, 9), (7.5, 9), (6, 16), (11, 6.5), (7.5, 6.5)]), with: .color(a)) }
+            if lv >= 0 && lv < 0.2 { col = FaceView.alert }
+            name = chg ? "battery.100.bolt" : lv < 0 ? "battery.0" : lv > 0.875 ? "battery.100" : lv > 0.625 ? "battery.75" : lv > 0.375 ? "battery.50" : lv > 0.1 ? "battery.25" : "battery.0"
         }
+        var im = g.resolve(Image(systemName: name)); im.shading = .color(col)
+        let sz = im.size, k = 15 / max(sz.width, sz.height)
+        g.draw(im, in: CGRect(x: o.x + 8 - sz.width * k / 2, y: o.y + 8 - sz.height * k / 2, width: sz.width * k, height: sz.height * k))
     }
-    /// Curved complication: icon + value laid along an arc band concentric with the Enoch disc, just along its rim.
-    /// `deg` is the chip centre angle from the screen centre (screen coords: 0 = right, 90 = down). Icon on the outer side.
+    /// Curved complication: icon + value laid along the disc rim (no frame). `deg` = centre angle from the screen centre
+    /// (0 = right, 90 = down). Icon on the outer side; value always white.
     private func chip(_ g: inout GraphicsContext, _ size: CGSize, deg: Double, leading: Bool, _ icon: Icon, _ val: String, _ vcol: Color, alertOn: Bool = false) {
         let c = CGPoint(x: size.width / 2, y: size.height / 2), R0 = min(size.width, size.height) / 2 - 4
-        let rm = R0 + 6.0, hb = 11.0, top = sin(deg * .pi / 180) < 0
-        // reading direction (left to right on screen): clockwise on the top arc, counter-clockwise on the bottom arc
-        let dir = top ? 1.0 : -1.0
-        let glyphs = val.map { g.resolve(Text(String($0)).font(.system(size: 13, weight: .heavy, design: .monospaced)).foregroundColor(vcol)) }
+        let rm = R0 + 6.0, top = sin(deg * .pi / 180) < 0, dir = top ? 1.0 : -1.0
+        let glyphs = val.map { g.resolve(Text(String($0)).font(.system(size: 13, weight: .heavy, design: .monospaced)).foregroundColor(.white)) }
         let gw = glyphs.map { $0.measure(in: CGSize(width: 40, height: 40)).width }
-        let iconL = 17.0, gap = 4.0, textL = gw.reduce(0, +), padL = 6.0
-        let total = padL + iconL + gap + textL + padL, span = total / rm
-        // items in reading order: icon first on the left chips, last on the right chips
-        let s0 = deg * .pi / 180 - dir * span / 2 // angle at the left (reading-start) end
-        func at(_ len: Double) -> (CGPoint, Double) { let t = s0 + dir * len / rm; return (CGPoint(x: c.x + rm * cos(t), y: c.y + rm * sin(t)), t) }
+        let iconL = 16.0, gap = 3.0, total = iconL + gap + gw.reduce(0, +), s0 = deg * .pi / 180 - dir * total / rm / 2
         func place(_ len: Double, _ body: (inout GraphicsContext) -> Void) {
-            let (p, t) = at(len); var l = g; l.translateBy(x: p.x, y: p.y); l.rotate(by: .radians(t + dir * .pi / 2)); body(&l) }
-        var pos = padL
+            let t = s0 + dir * len / rm; var l = g
+            l.translateBy(x: c.x + rm * cos(t), y: c.y + rm * sin(t)); l.rotate(by: .radians(t + dir * .pi / 2)); body(&l) }
+        var pos = 0.0
         func drawText() { for (k, t) in glyphs.enumerated() { place(pos + gw[k] / 2) { $0.draw(t, at: .zero, anchor: .center) }; pos += gw[k] } }
         func drawIc() { place(pos + iconL / 2) { l in drawIcon(&l, icon, CGPoint(x: -8, y: -8), alertOn: alertOn) }; pos += iconL }
         if leading { drawIc(); pos += gap; drawText() } else { drawText(); pos += gap; drawIc() }
-        // bracket frame bent along the band: short arcs on the inner/outer radius at both ends, plus short radial ticks
-        let a0 = s0, a1 = s0 + dir * span, tick = 7.0
-        var b = Path()
-        for (ae, sgn) in [(a0, dir), (a1, -dir)] {
-            for r in [rm - hb, rm + hb] {
-                b.addArc(center: c, radius: r, startAngle: .radians(ae), endAngle: .radians(ae + sgn * tick / r), clockwise: sgn < 0)
-            }
-            b.move(to: CGPoint(x: c.x + (rm - hb) * cos(ae), y: c.y + (rm - hb) * sin(ae))); b.addLine(to: CGPoint(x: c.x + (rm - hb + 4) * cos(ae), y: c.y + (rm - hb + 4) * sin(ae)))
-            b.move(to: CGPoint(x: c.x + (rm + hb) * cos(ae), y: c.y + (rm + hb) * sin(ae))); b.addLine(to: CGPoint(x: c.x + (rm + hb - 4) * cos(ae), y: c.y + (rm + hb - 4) * sin(ae)))
-        }
-        g.stroke(b, with: .color(.white.opacity(0.75)), lineWidth: 0.8)
     }
 
     private func corners(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ sky: Sky) {
@@ -333,7 +320,7 @@ struct FaceView: View {
         let bpm = hr.bpm.flatMap { v in hr.at.map { date.timeIntervalSince($0) < 900 } == true ? v : nil }
         let bad = bpm.map { $0 < 40 || $0 > 120 } == true
         // shifted down the rim (toward 3 o'clock) to stay clear of the watchOS system clock in the top-right corner
-        chip(&g, size, deg: -38, leading: false, .heart, bpm.map { "\($0)" } ?? "--", bad ? FaceView.alert : .white, alertOn: bad)
+        chip(&g, size, deg: -31, leading: false, .heart, bpm.map { "\($0)" } ?? "--", bad ? FaceView.alert : .white, alertOn: bad)
         // bottom-left: rain chance (Open-Meteo, free, no key); amber when older than 20 min
         let stale = wxOk.map { date.timeIntervalSince($0) > 1200 } ?? false
         chip(&g, size, deg: 126, leading: true, .rain, rain.map { "\($0)%" } ?? "--", stale ? FaceView.amber : .white)
@@ -399,7 +386,7 @@ struct DigitsShape: Shape {
     let hh: String, mm: String, fs: CGFloat
     func path(in rect: CGRect) -> Path {
         // slanted sporty digits: Chakra Petch Bold Italic (OFL, bundled, UIAppFonts), placed on fixed tabular cells
-        let heavy = CTFontCreateWithName("ChakraPetch-BoldItalic" as CFString, fs, nil), adv = fs * 0.62
+        let heavy = CTFontCreateWithName("ChakraPetch-BoldItalic" as CFString, fs, nil), adv = fs * 0.68
         func line(_ s: String) -> (CGMutablePath, CGRect) {
             let out = CGMutablePath()
             for (k, ch) in s.utf16.enumerated() {
@@ -409,7 +396,7 @@ struct DigitsShape: Shape {
             }
             return (out, out.boundingBoxOfPath)
         }
-        let gap = fs * 0.06, (a, ba) = line(hh), (b, bb) = line(mm), total = ba.height + gap + bb.height
+        let gap = fs * 0.1, (a, ba) = line(hh), (b, bb) = line(mm), total = ba.height + gap + bb.height
         var p = Path()
         // CoreText is y-up: flip each row and centre it in rect
         let ta = CGAffineTransform(translationX: rect.midX - ba.midX, y: rect.midY - total / 2 + ba.maxY).scaledBy(x: 1, y: -1)
