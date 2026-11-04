@@ -4,29 +4,71 @@ import CoreLocation
 import WatchKit
 import CoreMotion
 
+/// Position from the watch's own GPS (satellites) only: no wifi, cellular or internet lookups.
+/// City label comes from the bundled GeoNames list (cities.tsv, CC BY 4.0), country from countries.json, so both work offline and mid-flight.
+/// Updates run only while the face is active (wrist up); always-on stops them (battery rule).
 final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var coord = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548) // fallback: Santandrei, Bihor, Romania (home)
     @Published var live = false
     @Published var place: String? = nil
     private var placeAt: CLLocation? = nil
-    private let geo = CLGeocoder()
     private let m = CLLocationManager()
-    override init() { super.init(); m.delegate = self; m.desiredAccuracy = kCLLocationAccuracyKilometer
-        m.distanceFilter = 500
-        if !ProcessInfo.processInfo.arguments.contains("-noLocPrompt") { m.requestWhenInUseAuthorization(); m.startUpdatingLocation() }
+    private var wanted = false
+    private let noPrompt = ProcessInfo.processInfo.arguments.contains("-noLocPrompt")
+    /// a fix this precise and this fresh can only come from satellites, not cell or wifi positioning
+    private static let maxError: CLLocationAccuracy = 100, maxAge: TimeInterval = 120
+    override init() { super.init(); m.delegate = self
+        m.desiredAccuracy = kCLLocationAccuracyBest // turns the GPS receiver on
+        m.distanceFilter = 50
+        m.activityType = .other
+        if !noPrompt { m.requestWhenInUseAuthorization() }
         // deferred: @StateObject builds this during a view update, so publishing here directly would warn
         let c = coord; DispatchQueue.main.async { Borders.shared.locate(c) } }
-    func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) { if let L = l.last { coord = L.coordinate; live = true
-            // reverse-geocode (CLGeocoder) only after moving more than 5 km
-            if placeAt.map({ L.distance(from: $0) > 5000 }) ?? true, !geo.isGeocoding {
-                placeAt = L; geo.reverseGeocodeLocation(L) { [weak self] pm, _ in
-                    guard let f = pm?.first else { return }
-                    let city = (f.locality ?? f.administrativeArea)?.uppercased(), country = (f.country ?? Borders.shared.country?.name)?.uppercased()
-                    DispatchQueue.main.async { self?.place = [city, country].compactMap { $0 }.joined(separator: ", ")
-                        if let c = f.locality { Borders.shared.fetchCity(c, L.coordinate) } } } }
-            // country borders: point-in-polygon on every GPS fix (bundled Natural Earth 1:110m, public domain)
-            Borders.shared.locate(L.coordinate) } }
-    func locationManager(_ m: CLLocationManager, didFailWithError e: Error) {}
+    private var authorized: Bool { let s = m.authorizationStatus; return s == .authorizedWhenInUse || s == .authorizedAlways }
+    /// wrist up / app active: restart so a stale or suspended session gets a fresh satellite fix
+    func wake() { wanted = true; guard authorized, !noPrompt else { return }; m.stopUpdatingLocation(); m.startUpdatingLocation() }
+    /// always-on / inactive: GPS off
+    func sleep() { wanted = false; m.stopUpdatingLocation() }
+    func locationManagerDidChangeAuthorization(_ m: CLLocationManager) { if wanted { wake() } }
+    func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) {
+        guard let L = l.last(where: { $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= Locator.maxError && -$0.timestamp.timeIntervalSinceNow < Locator.maxAge }) else { return }
+        coord = L.coordinate; live = true
+        // country borders: point-in-polygon on every fix (bundled Natural Earth 1:110m, public domain)
+        Borders.shared.locate(L.coordinate)
+        // offline city name, recomputed after moving more than 2 km
+        if placeAt.map({ L.distance(from: $0) > 2000 }) ?? true {
+            placeAt = L
+            let city = Cities.shared.nearest(L.coordinate)
+            place = [city?.uppercased(), Borders.shared.country?.name.uppercased()].compactMap { $0 }.joined(separator: ", ")
+            // city outline is decoration: fetched only when there is internet, retried on the next city change if it fails
+            if let city { Borders.shared.fetchCity(city, L.coordinate) }
+        } }
+    func locationManager(_ m: CLLocationManager, didFailWithError e: Error) {
+        // locationUnknown is temporary (no satellites yet, e.g. inside a plane): updates keep running and retry on their own
+        if (e as? CLError)?.code == .denied { m.stopUpdatingLocation() }
+    }
+}
+
+/// Nearest populated place from the bundled GeoNames cities5000 list (name, lat, lon per line). Fully offline.
+final class Cities {
+    static let shared = Cities()
+    private let names: [String]; private let lat: [Double]; private let lon: [Double]
+    private init() {
+        var n: [String] = [], a: [Double] = [], o: [Double] = []
+        if let u = Bundle.main.url(forResource: "cities", withExtension: "tsv"), let t = try? String(contentsOf: u, encoding: .utf8) {
+            n.reserveCapacity(70_001); a.reserveCapacity(70_001); o.reserveCapacity(70_001)
+            for line in t.split(separator: "\n") { let f = line.split(separator: "\t")
+                if f.count == 3, let y = Double(f[1]), let x = Double(f[2]) { n.append(String(f[0])); a.append(y); o.append(x) } }
+        }
+        names = n; lat = a; lon = o
+    }
+    func nearest(_ c: CLLocationCoordinate2D) -> String? {
+        let k = cos(c.latitude * .pi / 180); var best = -1, bd = Double.infinity
+        for i in 0..<names.count { let dy = lat[i] - c.latitude; var dx = abs(lon[i] - c.longitude); if dx > 180 { dx = 360 - dx }; dx *= k
+            let d = dy * dy + dx * dx; if d < bd { bd = d; best = i } }
+        // farther than about 50 km (open sea, mid-ocean flight): no city name, the country alone shows
+        return best >= 0 && bd < 0.2 ? names[best] : nil
+    }
 }
 
 /// Country (Natural Earth 1:110m admin-0, bundled countries.json: [[NAME, [polygon [ring [[lon,lat]]]]]])
@@ -56,7 +98,7 @@ final class Borders: ObservableObject {
         country = all.first { Borders.inPolys($0.polys, c.longitude, c.latitude) }
     }
     func fetchCity(_ name: String, _ c: CLLocationCoordinate2D) {
-        guard name != cityName else { return }; cityName = name; city = []
+        guard name != cityName else { return }; city = []
         var u = URLComponents(string: "https://nominatim.openstreetmap.org/reverse")!
         u.queryItems = [.init(name: "format", value: "jsonv2"), .init(name: "lat", value: String(c.latitude)), .init(name: "lon", value: String(c.longitude)),
                         .init(name: "zoom", value: "10"), .init(name: "polygon_geojson", value: "1"), .init(name: "polygon_threshold", value: "0.002")]
@@ -66,7 +108,7 @@ final class Borders: ObservableObject {
             var rings: [Ring] = []
             if t == "Polygon", let p = g["coordinates"] as? [Ring] { rings = p }
             if t == "MultiPolygon", let mp = g["coordinates"] as? [[Ring]] { rings = mp.flatMap { $0 } }
-            DispatchQueue.main.async { self.city = rings }
+            DispatchQueue.main.async { self.city = rings; self.cityName = name } // only a successful fetch marks the city done
         }.resume()
     }
 }
@@ -154,14 +196,14 @@ struct FaceView: View {
             }
         }
         .background(Color.black)
-        .onAppear { zt = min(fillZoom, max(1, zoom)); zs.reset(zt); if !aod { motion.start() }; crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
+        .onAppear { zt = min(fillZoom, max(1, zoom)); zs.reset(zt); if !aod { motion.start(); loc.wake() }; crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
         .onChange(of: lum) { logAOD() }
         .onChange(of: phase) { logAOD() }
-        .onChange(of: aod) { _, v in if v { motion.stop(); hr.pause(); scrub = 0; detail = nil } else { motion.start(); hr.resume(); fetchTemp(loc.coord) } }
+        .onChange(of: aod) { _, v in if v { motion.stop(); hr.pause(); loc.sleep(); scrub = 0; detail = nil } else { motion.start(); hr.resume(); loc.wake(); fetchTemp(loc.coord) } }
         // weather fetch lives outside the draw path: every 12 min, and when the location moves
         .task { while !Task.isCancelled { if !aod { fetchTemp(loc.coord) }; try? await Task.sleep(nanoseconds: 720_000_000_000) } }
         .onChange(of: loc.live) { _ in fetchTemp(loc.coord) }
-        .onDisappear { motion.stop() }
+        .onDisappear { motion.stop(); loc.sleep() }
         .toolbar(.hidden, for: .navigationBar)
         .persistentSystemOverlays(.hidden)
         // hides the watchOS status-bar time (SwiftUI underscored modifier, present in the public SDK interface)

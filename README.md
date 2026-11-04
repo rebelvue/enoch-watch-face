@@ -6,7 +6,7 @@ A watch face prototype built on the World of Enoch flat-earth map (https://githu
 - The sun sits over its subsolar point. A soft night shade covers the side where the sun is below the horizon.
 - The moon sits over its sublunar point and shows its current phase.
 - The stars turn around the pole with sidereal time.
-- A red dot marks your position: GPS when allowed, otherwise home in Santandrei, Bihor (47.0682 N, 21.8548 E).
+- A red dot marks your position from the watch's own GPS (satellites only, no wifi, cellular or internet), refreshed whenever you raise your wrist. Before the first fix it shows home in Santandrei, Bihor (47.0682 N, 21.8548 E). The city name comes offline from the bundled GeoNames list (`cities.tsv`, CC BY 4.0, cities over 5,000 people).
 
 ## Web version
 Live: https://rebelvue.github.io/enoch-watch-face/
