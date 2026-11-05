@@ -234,8 +234,8 @@ struct FaceView: View {
 
     var body: some View {
         Group {
-            if aod && fadeAt == .distantPast { TimelineView(.everyMinute) { ctx in face(ctx.date, true).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
-            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : idle ? 1.0 / 8 : 1.0 / 24)) { ctx in blend(ctx.date).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
+            if aod && fadeAt == .distantPast { TimelineView(.everyMinute) { ctx in face(ctx.date, true).redNight(redOn).overlay { redDigits(ctx.date, 1) }.onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
+            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : idle ? 1.0 / 8 : 1.0 / 24)) { ctx in blend(ctx.date).redNight(redOn).overlay { redDigits(ctx.date, mix(ctx.date)) }.onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -305,7 +305,6 @@ struct FaceView: View {
                 let i = now > liveUntil; if i != idle { idle = i }
             }
         }
-        .redNight(redMode == 1 || (redMode == 0 && red))
         .background {
             // Series 9/10 and Ultra 2 double tap (index finger + thumb): same zoom as tapping the screen twice
             if #available(watchOS 11.0, *) {
@@ -415,6 +414,20 @@ struct FaceView: View {
     private func mix(_ now: Date) -> Double {
         let t = fadeAt == .distantPast ? 1 : min(1, max(0, now.timeIntervalSince(fadeAt) / 0.5)), e = t * t * (3 - 2 * t)
         return aod ? e : 1 - e
+    }
+
+    private var redOn: Bool { redMode == 1 || (redMode == 0 && red) }
+    /// Red night only (Levi, 2026-11-05): brighter red, stronger Liquid Glass digits drawn over the red-filtered face,
+    /// so the time stays readable. m = always-on mix (0 active, 1 always-on).
+    @ViewBuilder private func redDigits(_ now: Date, _ m: Double) -> some View {
+        if redOn {
+            let date = now.addingTimeInterval(m >= 1 ? 0 : sc.x * 3600)
+            ZStack {
+                if m < 1 { RedGlassTime(date: date, tilt: motion.read(now), aod: false).opacity(1 - m) }
+                if m > 0 { RedGlassTime(date: date, aod: true).opacity(m) }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity).ignoresSafeArea().allowsHitTesting(false)
+        }
     }
 
     /// Animated frame: the active face, the always-on face, or both cross-fading; north frame on top (active only).
@@ -1468,5 +1481,41 @@ struct NorthBandView: View {
                 }
             }
         }.ignoresSafeArea()
+    }
+}
+
+
+/// Red night digits: bright red, translucent, accented Liquid Glass (watchOS 26+), same layout as GlassTime.
+struct RedGlassTime: View {
+    @AppStorage("enoch12h") private var h12 = false
+    let date: Date
+    var tilt: CGPoint = .zero
+    var aod = false
+    static let red = Color(red: 1, green: 0.13, blue: 0.08)
+    var body: some View {
+        GeometryReader { geo in
+            let cal = Calendar.current, h = cal.component(.hour, from: date)
+            let hh = String(format: "%02d", h12 ? (h + 11) % 12 + 1 : h), mm = String(format: "%02d", cal.component(.minute, from: date))
+            let fs = min(geo.size.width * 0.78 / 1.2, geo.size.height * 0.36)
+            let shape = DigitsShape(hh: hh, mm: mm, fs: fs), r = Self.red
+            if aod {
+                shape.stroke(r.opacity(0.85), lineWidth: 1.2).frame(width: geo.size.width, height: geo.size.height)
+            } else {
+                ZStack {
+                    shape.fill(r.opacity(0.32))
+                    if #available(watchOS 26.0, *) {
+                        Color.clear.frame(width: geo.size.width, height: geo.size.height)
+                            .glassEffect(.regular.tint(r.opacity(0.7)), in: shape)
+                    } else {
+                        shape.fill(r.opacity(0.35))
+                    }
+                    let ang = atan2(Double(tilt.y) + 0.35, -Double(tilt.x) - 0.35), mag = min(1, 0.45 + hypot(tilt.x, tilt.y))
+                    let hot = UnitPoint(x: 0.5 + 0.5 * cos(ang), y: 0.5 - 0.5 * sin(ang)), cold = UnitPoint(x: 1 - hot.x, y: 1 - hot.y)
+                    shape.stroke(LinearGradient(colors: [Color(red: 1, green: 0.45, blue: 0.35).opacity(0.95 * mag + 0.05), r.opacity(0.5), r.opacity(0.8)],
+                                                startPoint: hot, endPoint: cold), lineWidth: 1.6)
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+        }
     }
 }
