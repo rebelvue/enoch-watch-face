@@ -471,7 +471,7 @@ struct FaceView: View {
             if !a { Canvas { g, size in hourGlow(&g, size, now) }.zIndex(0.7).allowsHitTesting(false) }
             if !a { Canvas { g, size in compassMarks(&g, size, now) }.zIndex(4.2).allowsHitTesting(false) }
             if !a { Canvas { g, size in sunLock(&g, size, now) }.zIndex(3.2).allowsHitTesting(false) }
-            GlassTime(date: date, tilt: tilt, aod: a).offset(Self.px(tilt, 11)).aodGrey(a).zIndex(1)
+            GlassTime(date: date, tilt: tilt, aod: a).aodGrey(a).zIndex(1) // digits fixed (no parallax, Levi 2026-11-05); light still follows the wrist
             Canvas { g, size in draw(&g, size, date, 3, 0, a) }.spun(spin).offset(Self.px(tilt, 6)).aodGrey(a).zIndex(2).allowsHitTesting(false)
             Canvas { g, size in draw(&g, size, date, 1, 0, a) }.spun(spin).aodGrey(a).zIndex(3).allowsHitTesting(false)
             if a { Canvas { g, size in draw(&g, size, date, 5, 0, a) }.spun(spin).zIndex(3.5).allowsHitTesting(false) }
@@ -997,19 +997,25 @@ final class ZoomSpring {
 /// `glassEffect(_:in:)` modifier can render Liquid Glass in the exact shape of the digits.
 struct DigitsShape: Shape {
     let hh: String, mm: String, fs: CGFloat
+    /// nil = all four digits; 0...3 = only that digit (H, H, M, M), in the same place, for one glass piece per digit
+    var only: Int? = nil
     func path(in rect: CGRect) -> Path {
         // slanted sporty digits: Chakra Petch Bold Italic (OFL, bundled, UIAppFonts), placed on fixed tabular cells
         let heavy = CTFontCreateWithName("ChakraPetch-BoldItalic" as CFString, fs, nil), adv = fs * 0.68
-        func line(_ s: String) -> (CGMutablePath, CGRect) {
-            let out = CGMutablePath()
+        func line(_ s: String, _ row: Int) -> (CGMutablePath, CGRect) {
+            let out = CGMutablePath(), all = CGMutablePath()
             for (k, ch) in s.utf16.enumerated() {
+                let keep = only == nil || only == row * 2 + k
                 var u = ch, gl: CGGlyph = 0; CTFontGetGlyphsForCharacters(heavy, &u, &gl, 1)
                 var w = CGSize.zero; CTFontGetAdvancesForGlyphs(heavy, .horizontal, &gl, &w, 1)
-                if let gp = CTFontCreatePathForGlyph(heavy, gl, nil) { out.addPath(gp, transform: CGAffineTransform(translationX: Double(k) * adv + (adv - w.width) / 2, y: 0)) }
+                if let gp = CTFontCreatePathForGlyph(heavy, gl, nil) {
+                    let t = CGAffineTransform(translationX: Double(k) * adv + (adv - w.width) / 2, y: 0)
+                    all.addPath(gp, transform: t); if keep { out.addPath(gp, transform: t) } }
             }
-            return (out, out.boundingBoxOfPath)
+            // layout always uses the full row, so a single digit sits exactly where it does in the whole time
+            return (out, all.boundingBoxOfPath)
         }
-        let gap = fs * 0.1, (a, ba) = line(hh), (b, bb) = line(mm), total = ba.height + gap + bb.height
+        let gap = fs * 0.1, (a, ba) = line(hh, 0), (b, bb) = line(mm, 1), total = ba.height + gap + bb.height
         var p = Path()
         // CoreText is y-up: flip each row and centre it in rect
         let ta = CGAffineTransform(translationX: rect.midX - ba.midX, y: rect.midY - total / 2 + ba.maxY).scaledBy(x: 1, y: -1)
@@ -1022,6 +1028,7 @@ struct DigitsShape: Shape {
 /// Time as Liquid Glass per Apple's docs: `glassEffect(.clear, in: shape)`; the system draws the blur,
 /// lensing, adaptive tint and light-following rim itself. No extra shadows, strokes or fills.
 struct GlassTime: View {
+    @Namespace private var glassNS
     let date: Date
     var tilt: CGPoint = .zero // smoothed gravity x/y, -1...1
     var aod = false
@@ -1039,7 +1046,23 @@ struct GlassTime: View {
             } else {
             ZStack {
                 if #available(watchOS 26.0, *) {
-                    Color.clear.glassEffect(.clear, in: shape)
+                    // Apple, "Applying Liquid Glass to custom views": several glass shapes go in one GlassEffectContainer
+                    // (best rendering performance, and nearby shapes blend like one liquid body); each digit carries a
+                    // glassEffectID, so when a digit changes the old glass morphs into the new one instead of cutting.
+                    let ds = Array(hh + mm).map(String.init)
+                    GlassEffectContainer(spacing: fs * 0.06) {
+                        ZStack {
+                            ForEach(0..<4, id: \.self) { k in
+                                Color.clear
+                                    .frame(width: geo.size.width, height: geo.size.height)
+                                    .glassEffect(.clear, in: DigitsShape(hh: hh, mm: mm, fs: fs, only: k))
+                                    .glassEffectID("d\(k)-\(ds[k])", in: glassNS)
+                                    .glassEffectTransition(.matchedGeometry)
+                                    .id("d\(k)-\(ds[k])")
+                            }
+                        }
+                    }
+                    .animation(.smooth(duration: 0.6), value: hh + mm)
                 } else {
                     shape.fill(.ultraThinMaterial.opacity(0.5))
                 }
