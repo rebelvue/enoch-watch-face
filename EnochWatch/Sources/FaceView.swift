@@ -217,6 +217,9 @@ struct FaceView: View {
     // wrist shake: quick compass resync instead of the early always-on look
     @State private var shakeSeen = Date.distantPast
     @State private var syncAt = Date.distantPast
+    // green "calibrated" confirmation: after a shake sync or a CAL warning, once accuracy is good (under 20 deg)
+    @State private var calPending = false
+    @State private var calOkAt = Date.distantPast
 
     private func setCadence(_ c: TimelineViewDefaultContext.Cadence) {
         let low = c != .live; if low != lowCadence { lowCadence = low; logAOD(c) } }
@@ -258,7 +261,7 @@ struct FaceView: View {
                 let now = Date()
                 if !sysAOD {
                     if motion.shakeAt > shakeSeen {   // new shake: resync the compass, show SYNC, cancel any early dim
-                        shakeSeen = motion.shakeAt; syncAt = now; loc.resync(); calSince = nil
+                        shakeSeen = motion.shakeAt; syncAt = now; loc.resync(); calSince = nil; calPending = true
                         awayDet.reset(); if away { away = false }
                     }
                     if motion.shaking(now) { awayDet.reset() }
@@ -269,8 +272,13 @@ struct FaceView: View {
                 if r != red { red = r }
                 if aod { if northOn { northOn = false; northOffAt = .distantPast }; if deadOn { deadOn = false; deadFrom = 0; deadAt = .distantPast }; continue }
                 let ca = loc.headingAcc, flip = calShow ? (ca >= 0 && ca < 30) : (ca < 0 || ca > 45)
-                if flip { if calSince == nil { calSince = now } else if now.timeIntervalSince(calSince!) >= (calShow ? 2 : 5) { calShow.toggle(); calSince = nil } }
+                if flip { if calSince == nil { calSince = now } else if now.timeIntervalSince(calSince!) >= (calShow ? 2 : 5) { calShow.toggle(); calSince = nil; calPending = calShow } }
                 else { calSince = nil }
+                // confirm in green once the compass is good again (after a sync: wait 0.4 s for fresh readings; give up after 10 s)
+                if calPending && !calShow && now.timeIntervalSince(syncAt) > 0.4 {
+                    if ca >= 0 && ca < 20 { calPending = false; calOkAt = now; WKInterfaceDevice.current().play(.success) }
+                    else if now.timeIntervalSince(syncAt) > 10 && syncAt > .distantPast && !calShow { calPending = false }
+                }
                 if let sd = sunDev(now) { let on = sunOn ? sd < 8 : sd < 5; if on != sunOn { if on { sunAt = now }; sunOn = on } }
                 else if sunOn { sunOn = false }
                 if let h = loc.heading {
@@ -332,8 +340,11 @@ struct FaceView: View {
             g.draw(g.resolve(Text("\(card) ").font(mono(9)).foregroundColor(o) + Text("\(hd)\u{00B0}").font(mono(9)).foregroundColor(.white)),
                    at: CGPoint(x: c.x, y: size.height - 24), anchor: .center)
         }
-        let st = now.timeIntervalSince(syncAt)
-        if st < 1.2 {
+        let st = now.timeIntervalSince(syncAt), ok = now.timeIntervalSince(calOkAt)
+        if ok < 2 {
+            let p = ok < 0.15 ? ok / 0.15 : max(0, 1 - (ok - 1.4) / 0.6), green = Color(red: 0.2, green: 0.95, blue: 0.45)
+            g.draw(g.resolve(Text("CAL \u{2713}").font(mono(8)).foregroundColor(green.opacity(min(1, p)))), at: CGPoint(x: c.x, y: size.height - 34), anchor: .center)
+        } else if st < 1.2 {
             let p = st < 0.15 ? st / 0.15 : max(0, 1 - (st - 0.6) / 0.6)
             g.draw(g.resolve(Text("SYNC").font(mono(8)).foregroundColor(.white.opacity(min(1, p)))), at: CGPoint(x: c.x, y: size.height - 34), anchor: .center)
         } else if calShow {
