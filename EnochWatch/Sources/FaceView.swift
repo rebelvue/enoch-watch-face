@@ -36,6 +36,9 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
         guard authorized, !noPrompt else { return }; m.stopUpdatingLocation(); m.startUpdatingLocation() }
     /// always-on / inactive: GPS off
     func sleep() { wanted = false; m.stopUpdatingLocation(); m.stopUpdatingHeading() }
+    /// wrist shake: restart the compass so it re-reads the magnetometer right away (the system does the calibration itself;
+    /// the shake's motion helps it). Keeps the last heading on screen until the fresh one arrives.
+    func resync() { guard wanted, CLLocationManager.headingAvailable() else { return }; m.stopUpdatingHeading(); m.startUpdatingHeading() }
     func locationManager(_ m: CLLocationManager, didUpdateHeading h: CLHeading) {
         if abs(h.headingAccuracy - headingAcc) >= 1 || (h.headingAccuracy < 0) != (headingAcc < 0) { headingAcc = h.headingAccuracy }
         guard h.headingAccuracy >= 0 else { return } // negative = invalid (needs calibration)
@@ -187,6 +190,9 @@ struct FaceView: View {
     @State private var sunOn = false
     @State private var sunAt = Date.distantPast
     @State private var calSince: Date? = nil
+    // wrist shake: quick compass resync instead of the early always-on look
+    @State private var shakeSeen = Date.distantPast
+    @State private var syncAt = Date.distantPast
 
     private func setCadence(_ c: TimelineViewDefaultContext.Cadence) {
         let low = c != .live; if low != lowCadence { lowCadence = low; logAOD(c) } }
@@ -223,7 +229,14 @@ struct FaceView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 let now = Date()
-                if !sysAOD { let a = awayDet.update(motion.gz, now); if a != away { away = a } }
+                if !sysAOD {
+                    if motion.shakeAt > shakeSeen {   // new shake: resync the compass, show SYNC, cancel any early dim
+                        shakeSeen = motion.shakeAt; syncAt = now; loc.resync(); calSince = nil
+                        awayDet.reset(); if away { away = false }
+                    }
+                    if motion.shaking(now) { awayDet.reset() }
+                    else { let a = awayDet.update(motion.gz, now); if a != away { away = a } }
+                }
                 if fadeAt != .distantPast && now.timeIntervalSince(fadeAt) > 0.55 { fadeAt = .distantPast }
                 let alt = sunAlt(now), r = red ? alt < -3 : alt < -4   // 1 degree of hysteresis
                 if r != red { red = r }
@@ -290,7 +303,11 @@ struct FaceView: View {
             g.draw(g.resolve(Text("\(card) ").font(mono(9)).foregroundColor(o) + Text("\(hd)\u{00B0}").font(mono(9)).foregroundColor(.white)),
                    at: CGPoint(x: c.x, y: size.height - 24), anchor: .center)
         }
-        if calShow {
+        let st = now.timeIntervalSince(syncAt)
+        if st < 1.2 {
+            let p = st < 0.15 ? st / 0.15 : max(0, 1 - (st - 0.6) / 0.6)
+            g.draw(g.resolve(Text("SYNC").font(mono(8)).foregroundColor(.white.opacity(min(1, p)))), at: CGPoint(x: c.x, y: size.height - 34), anchor: .center)
+        } else if calShow {
             let p = 0.55 + 0.45 * sin(now.timeIntervalSince1970 * 4)
             g.draw(g.resolve(Text("CAL \u{221E}").font(mono(8)).foregroundColor(o.opacity(p))), at: CGPoint(x: c.x, y: size.height - 34), anchor: .center)
         }
@@ -367,13 +384,16 @@ struct FaceView: View {
     /// Orange frame around the screen while facing north (the centre of the map): flash in, fade out.
     private func northFrame(_ g: inout GraphicsContext, _ size: CGSize, _ now: Date) {
         let (al, f) = northLevel(now); if al <= 0.001 { return }
+        // dead on north (within 1.5 deg, easing in from 4 deg): the frame grows clearly thicker
+        let dv = loc.heading.map { min(Self.m360($0), 360 - Self.m360($0)) } ?? 180
+        let y = max(0, min(1, (4 - dv) / 2.5)), lk = y * y * (3 - 2 * y)
         let o = FaceView.orange, cr = min(size.width, size.height) * 0.21
         let r = Path(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5), cornerRadius: cr, style: .continuous)
         g.drawLayer { l in
             l.addFilter(.blur(radius: 5 + 5 * f))
-            l.stroke(r, with: .color(o.opacity((0.45 + 0.45 * f) * al)), lineWidth: 8 + 10 * f)
+            l.stroke(r, with: .color(o.opacity((0.45 + 0.45 * f + 0.15 * lk) * al)), lineWidth: 8 + 10 * f + 6 * lk)
         }
-        g.stroke(r, with: .color(o.opacity(al)), lineWidth: 2.5 + 1.5 * f)
+        g.stroke(r, with: .color(o.opacity(al)), lineWidth: 2.5 + 1.5 * f + 3.5 * lk)
         if f > 0 { g.stroke(r, with: .color(.white.opacity(0.5 * f * al)), lineWidth: 1) }
     }
 
@@ -838,7 +858,10 @@ final class Motion {
         if mm.isDeviceMotionAvailable {
             guard !mm.isDeviceMotionActive else { return }
             source = "deviceMotion"; mm.deviceMotionUpdateInterval = 1.0 / 60
-            mm.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in if let gr = m?.gravity { feed(gr.x, gr.y); self?.feedZ(gr.z) } }
+            mm.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in
+                guard let m else { return }
+                feed(m.gravity.x, m.gravity.y); self?.feedZ(m.gravity.z)
+                let u = m.userAcceleration; self?.feedShake(sqrt(u.x * u.x + u.y * u.y + u.z * u.z)) }
         } else if mm.isAccelerometerAvailable {
             guard !mm.isAccelerometerActive else { return }
             source = "accelerometer"; mm.accelerometerUpdateInterval = 1.0 / 60
@@ -872,7 +895,23 @@ final class Motion {
         return sp
     }
     private func feedZ(_ z: Double) { gz += (max(-1, min(1, z)) - gz) * 0.25 }
-    func stop() { mm.stopDeviceMotionUpdates(); mm.stopAccelerometerUpdates(); gz = -1 }
+    /// shake = 3 strong jolts (over 1.4 g of wrist acceleration, at least 0.08 s apart) within 1 s
+    private(set) var shakeAt = Date.distantPast
+    private var peaks: [Date] = [], above = false
+    private func feedShake(_ a: Double) {
+        let now = Date()
+        if a > 1.4 && !above { above = true
+            if peaks.last.map({ now.timeIntervalSince($0) > 0.08 }) ?? true { peaks.append(now) }
+            peaks.removeAll { now.timeIntervalSince($0) > 1 }
+            if peaks.count >= 3 { shakeAt = now; peaks.removeAll() }
+        } else if a < 0.8 { above = false }
+        // keep the wrist-away check quiet while still shaking
+        if now.timeIntervalSince(shakeAt) < 1.5 && a > 0.8 { quietTo = now.addingTimeInterval(1.2) }
+    }
+    private var quietTo = Date.distantPast
+    /// shaking now or in the last moment (1.5 s after the shake, extended while the wrist keeps jolting)
+    func shaking(_ now: Date) -> Bool { now.timeIntervalSince(shakeAt) < 1.5 || now < quietTo }
+    func stop() { mm.stopDeviceMotionUpdates(); mm.stopAccelerometerUpdates(); gz = -1; peaks.removeAll(); above = false; quietTo = .distantPast }
 }
 
 /// Critically-tuned spring (response 0.35 s, damping 0.65: a small visible overshoot), integrated per frame.
