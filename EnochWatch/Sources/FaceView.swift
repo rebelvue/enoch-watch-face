@@ -170,7 +170,7 @@ struct FaceView: View {
     enum Comp { case sun, bpm, rain, battery }
     // smooth cross-fade between the active and always-on looks (0.5 s); distantPast = no fade running
     @State private var fadeAt = Date.distantPast
-    // north frame: orange border while facing north (enter under 8 deg, leave over 14 deg), flash in, fade out
+    // north frame: orange border, full when facing north, fading out with the angle; flash when locking on (under 4 deg)
     @State private var northOn = false
     @State private var northAt = Date.distantPast
     @State private var northOffAt = Date.distantPast
@@ -222,7 +222,7 @@ struct FaceView: View {
                 if r != red { red = r }
                 if aod { if northOn { northOn = false; northOffAt = .distantPast }; continue }
                 if let h = loc.heading {
-                    let dv = min(Self.m360(h), 360 - Self.m360(h)), on = northOn ? dv < 14 : dv < 8
+                    let dv = min(Self.m360(h), 360 - Self.m360(h)), on = northOn ? dv < 7 : dv < 4
                     if on != northOn { if on { northAt = now } else { northFrom = northLevel(now).0; northOffAt = now }; northOn = on }
                 }
                 if scrub != 0 && now.timeIntervalSince(crownAt) > 2 { scrub = 0 }
@@ -311,14 +311,14 @@ struct FaceView: View {
         }
     }
 
-    /// North frame level: (opacity 0...1, flash 0...1). Flash peaks 0.12 s after facing north, settles over 0.7 s.
+    /// North frame level: (opacity 0...1, flash 0...1). Full orange when facing true north (within 2 deg), fading smoothly to
+    /// nothing at 45 deg away. Locking on (within 4 deg) adds a short flash that settles over 0.7 s.
     private func northLevel(_ now: Date) -> (Double, Double) {
-        if northOn {
-            let t = now.timeIntervalSince(northAt), f = t < 0.12 ? t / 0.12 : max(0, 1 - (t - 0.12) / 0.7)
-            return (0.75 + 0.25 * f, f)
-        }
-        let k = 1 - now.timeIntervalSince(northOffAt) / 0.6
-        return k > 0 ? (northFrom * k * k, 0) : (0, 0)
+        guard let h = loc.heading else { return (0, 0) }
+        let dv = min(Self.m360(h), 360 - Self.m360(h)), x = max(0, min(1, 1 - (dv - 2) / 43)), base = x * x * (3 - 2 * x)
+        var f = 0.0
+        if northOn { let t = now.timeIntervalSince(northAt); f = t < 0.12 ? t / 0.12 : max(0, 1 - (t - 0.12) / 0.7) }
+        return (min(1, base), f)
     }
 
     /// Orange frame around the screen while facing north (the centre of the map): flash in, fade out.
