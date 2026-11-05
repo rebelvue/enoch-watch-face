@@ -155,6 +155,9 @@ struct FaceView: View {
     @AppStorage("enochRedMode") private var redMode = 0      // 0 auto (sun below -4 deg), 1 always, 2 off
     @AppStorage("enochOnboarded") private var onboarded = false
     @State private var showSettings = false
+    @AppStorage("enochLaunches") private var launches = 0
+    @AppStorage("enochHoldKnown") private var holdKnown = false
+    @State private var hintUntil = Date.distantPast
     private let fillZoom: Double = {
         let b = WKInterfaceDevice.current().screenBounds.size
         return hypot(b.width, b.height) / 2 / (min(b.width, b.height) / 2 - 4)
@@ -190,7 +193,7 @@ struct FaceView: View {
     @State private var crownAt = Date.distantPast
     @State private var detail: Comp? = nil
     @State private var detailAt = Date.distantPast
-    enum Comp { case sun, bpm, rain, battery }
+    enum Comp { case sun, bpm, rain, battery, sunBody, moon }
     // smooth cross-fade between the active and always-on looks (0.5 s); distantPast = no fade running
     @State private var fadeAt = Date.distantPast
     // north frame: orange border, full when facing north, fading out with the angle; flash when locking on (under 4 deg)
@@ -199,9 +202,7 @@ struct FaceView: View {
     @State private var northOffAt = Date.distantPast
     @State private var northFrom = 0.0
     // dead on north: the frame thickens and fades in (0.35 s), then thins and fades out (0.45 s) when you drift off
-    @State private var deadOn = false
-    @State private var deadAt = Date.distantPast
-    @State private var deadFrom = 0.0
+    @State private var dead = DeadLock()
     // compass marks: smoothed screen angle of real north on the rim
     @State private var ns = ZoomSpring(response: 0.45, damping: 1)
     @State private var nrot = CompassTarget()
@@ -250,9 +251,9 @@ struct FaceView: View {
             scrub = max(-720, min(720, scrub + dv * hoursPerUnit))
         }
         .onTapGesture(count: 2) { toggleZoom() }
-        .onLongPressGesture(minimumDuration: 0.6) { if !aod { detail = nil; WKInterfaceDevice.current().play(.click); showSettings = true } }
+        .onLongPressGesture(minimumDuration: 0.6) { if !aod { detail = nil; holdKnown = true; hintUntil = .distantPast; WKInterfaceDevice.current().play(.click); showSettings = true } }
         .sheet(isPresented: $showSettings, onDismiss: { crownFocus = true }) { SettingsView(loc: loc) }
-        .fullScreenCover(isPresented: Binding(get: { !onboarded }, set: { if !$0 { onboarded = true } }), onDismiss: { crownFocus = true }) { IntroView { onboarded = true } }
+        .overlay { if !onboarded { IntroView { onboarded = true; crownFocus = true }.background(Color.black).transition(.opacity) } }
         .onTapGesture(count: 1, coordinateSpace: .local) { p in tap(p) }
         // crown idle 2 s: spring back to now; detail card times out after 6 s; drop to 30 fps once settled
         .task {
@@ -270,7 +271,7 @@ struct FaceView: View {
                 if fadeAt != .distantPast && now.timeIntervalSince(fadeAt) > 0.55 { fadeAt = .distantPast }
                 let alt = sunAlt(now), r = red ? alt < -3 : alt < -4   // 1 degree of hysteresis
                 if r != red { red = r }
-                if aod { if northOn { northOn = false; northOffAt = .distantPast }; if deadOn { deadOn = false; deadFrom = 0; deadAt = .distantPast }; continue }
+                if aod { if northOn { northOn = false; northOffAt = .distantPast }; continue }
                 let ca = loc.headingAcc, flip = calShow ? (ca >= 0 && ca < 30) : (ca < 0 || ca > 45)
                 if flip { if calSince == nil { calSince = now } else if now.timeIntervalSince(calSince!) >= (calShow ? 2 : 5) { calShow.toggle(); calSince = nil; calPending = calShow } }
                 else { calSince = nil }
@@ -284,9 +285,7 @@ struct FaceView: View {
                 if let h = loc.heading {
                     let dv = min(Self.m360(h), 360 - Self.m360(h)), on = northOn ? dv < 7 : dv < 4
                     if on != northOn { if on { northAt = now } else { northFrom = northLevel(now).0; northOffAt = now }; northOn = on }
-                    let d = deadOn ? dv < 3 : dv < 1.5
-                    if d != deadOn { deadFrom = deadLevel(now); deadAt = now; deadOn = d }
-                } else if deadOn { deadFrom = deadLevel(now); deadAt = now; deadOn = false }
+                }
                 if scrub != 0 && now.timeIntervalSince(crownAt) > 2 { scrub = 0 }
                 if detail != nil && now.timeIntervalSince(detailAt) > 6 { detail = nil }
                 let f = zs.moving || sc.moving || rs.moving || now.timeIntervalSince(crownAt) < 0.3
@@ -301,7 +300,8 @@ struct FaceView: View {
             }
         }
         .background(Color.black)
-        .onAppear { zt = min(fillZoom, max(1, zoom)); zs.reset(zt); if !aod { motion.start(); loc.wake() }; crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
+        .onAppear { if onboarded && !holdKnown && launches < 3 { launches += 1; hintUntil = Date().addingTimeInterval(8) }
+            zt = min(fillZoom, max(1, zoom)); zs.reset(zt); if !aod { motion.start(); loc.wake() }; crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
         .onChange(of: lum) { logAOD() }
         .onChange(of: phase) { logAOD() }
         .onChange(of: aod) { _, v in logAOD(); fadeAt = sysAOD ? .distantPast : Date(); if v { hr.pause(); loc.sleep(); scrub = 0; detail = nil } else { hr.resume(); loc.wake() } }
@@ -350,6 +350,9 @@ struct FaceView: View {
         } else if calShow {
             let p = 0.55 + 0.45 * sin(now.timeIntervalSince1970 * 4)
             g.draw(g.resolve(Text("CAL \u{221E}").font(mono(8)).foregroundColor(o.opacity(p))), at: CGPoint(x: c.x, y: size.height - 34), anchor: .center)
+        } else if now < hintUntil {
+            let t = hintUntil.timeIntervalSince(now), p = min(1, t / 0.6) * min(1, (8 - t) / 0.6)
+            g.draw(g.resolve(Text("HOLD FOR SETTINGS").font(mono(7)).foregroundColor(.white.opacity(0.75 * p))), at: CGPoint(x: c.x, y: size.height - 34), anchor: .center)
         }
     }
     static func m360(_ x: Double) -> Double { let y = fmod(x, 360); return y < 0 ? y + 360 : y }
@@ -424,8 +427,8 @@ struct FaceView: View {
     /// Dead-on-north thickness 0...1, animated in time: thicken + fade in over 0.35 s on lock (under 1.5 deg),
     /// thin + fade out over 0.45 s on release (over 3 deg), each starting from wherever the last one stopped.
     private func deadLevel(_ now: Date) -> Double {
-        let t = now.timeIntervalSince(deadAt), x = max(0, min(1, t / (deadOn ? 0.35 : 0.45))), e = x * x * (3 - 2 * x)
-        return deadOn ? deadFrom + (1 - deadFrom) * e : deadFrom * (1 - e)
+        let dv = loc.heading.map { min(Self.m360($0), 360 - Self.m360($0)) }
+        return dead.level(dv, now)
     }
 
     /// Orange frame around the screen while facing north (the centre of the map): flash in, fade out.
@@ -543,6 +546,10 @@ struct FaceView: View {
         // hit-test only the comps' actual rendered curved text bands (+6 pt), never quadrants or empty space
         let r = hypot(dx, dy), a = atan2(dy, dx) * 180 / .pi
         func dist(_ x: Double) -> Double { abs((x - a + 540).truncatingRemainder(dividingBy: 360) - 180) * .pi / 180 }
+        // the sun and the moon themselves (16 pt finger radius), nearest one wins
+        let hits: [(CGPoint?, Comp)] = [(SkyHits.sun, .sunBody), (SkyHits.moon, .moon)]
+        if let best = hits.compactMap({ h in h.0.map { (hypot(dx - $0.x, dy - $0.y), h.1) } }).filter({ $0.0 < 16 }).min(by: { $0.0 < $1.0 }) {
+            detail = best.1; detailAt = Date(); WKInterfaceDevice.current().play(.click); return }
         let opts: [(Double, Comp)] = [(-126, .sun), (-54, .bpm), (126, .rain), (54, .battery)]
         for (deg, c) in opts { guard let h = CompHits.bands[deg] else { continue }
             if r >= h.0 && r <= h.1 && dist(deg) <= h.2 { detail = c; detailAt = Date(); WKInterfaceDevice.current().play(.click); return } }
@@ -586,6 +593,27 @@ struct FaceView: View {
                     let m = Int(s.timeIntervalSince(r) / 60)
                     row("SUNRISE", tf.string(from: r)); row("SUNSET", tf.string(from: s)); row("DAY", "\(m / 60)h \(String(format: "%02d", m % 60))m")
                 } else { row("SUN", "POLAR") }
+            case .sunBody:
+                let t = Eclipses.trend(date, sun: true)
+                Text("THE SUN").font(mono(9)).foregroundColor(o)
+                row("PATH", t.inward ? "INWARD" : "OUTWARD")
+                Text(t.inward ? "TOWARDS THE CENTRE" : "TOWARDS THE ICE WALL").font(mono(7)).foregroundColor(.white.opacity(0.7))
+                if let turn = t.turns { row("TURNS", Eclipses.day(turn)) }
+                if let e = Eclipses.next(.solar, after: date) {
+                    Text("NEXT SOLAR ECLIPSE").font(mono(8)).foregroundColor(o).padding(.top, 2)
+                    HStack { Text(Eclipses.day(e.date)).font(mono(12)).foregroundColor(.white); Spacer(); Text(e.kind).font(mono(8)).foregroundColor(.white.opacity(0.7)) }
+                }
+            case .moon:
+                let sky = Sky(date: date), t = Eclipses.trend(date, sun: false)
+                let lit = Int(((1 - cos(sky.phase)) / 2 * 100).rounded())
+                Text("THE MOON").font(mono(9)).foregroundColor(o)
+                HStack { Text(Eclipses.phaseName(sky.phase)).font(mono(10)).foregroundColor(.white); Spacer(); Text("\(lit)%").font(mono(10)).foregroundColor(.white) }
+                row("PATH", t.inward ? "INWARD" : "OUTWARD")
+                Text(t.inward ? "TOWARDS THE CENTRE" : "TOWARDS THE ICE WALL").font(mono(7)).foregroundColor(.white.opacity(0.7))
+                if let e = Eclipses.next(.lunar, after: date) {
+                    Text("NEXT LUNAR ECLIPSE").font(mono(8)).foregroundColor(o).padding(.top, 2)
+                    HStack { Text(Eclipses.day(e.date)).font(mono(12)).foregroundColor(.white); Spacer(); Text(e.kind).font(mono(8)).foregroundColor(.white.opacity(0.7)) }
+                }
             }
         }
         .padding(12).frame(width: 156)
@@ -706,6 +734,7 @@ struct FaceView: View {
             g.draw(rt, at: o, anchor: .leading) }
         // sun: warm corona bloom, anamorphic streak, white-hot limb-darkened photosphere
         let amb = FaceView.orange, sp = P(sky.sunLat, sky.sunLon)
+        SkyHits.sun = CGPoint(x: sp.x - c.x, y: sp.y - c.y)
         var sg = g; sg.blendMode = .plusLighter
         // sun the same size as the moon (radius 6; flat-earth sun and moon look equal), glow and streak scaled to match
         sg.fill(Path(ellipseIn: CGRect(x: sp.x - 40, y: sp.y - 40, width: 80, height: 80)), with: .radialGradient(Gradient(stops: [
@@ -722,6 +751,7 @@ struct FaceView: View {
 
         // moon: NASA LRO nearside texture, sphere-shaded terminator, earthshine and limb darkening
         let mp = P(sky.moonLat, sky.moonLon), mr = 6.0
+        SkyHits.moon = CGPoint(x: mp.x - c.x, y: mp.y - c.y)
         if let img = shadedMoon(sky.phase) {
             g.draw(Image(decorative: img, scale: 1), in: CGRect(x: mp.x - mr, y: mp.y - mr, width: 2 * mr, height: 2 * mr)) }
         _ = amb
@@ -1169,7 +1199,7 @@ struct IntroView: View {
     private let pages: [(String, String, String)] = [
         ("", "Your world", "The map is the face. The dot is you, the glow is the sun right now."),
         ("digitalcrown.arrow.clockwise.fill", "Travel in time", "Turn the crown to move the sun and the night. Let go and it springs back to now."),
-        ("hand.tap.fill", "Tap and zoom", "Tap a corner for details. Double tap, or pinch your fingers, to zoom the map."),
+        ("hand.tap.fill", "Tap and zoom", "Tap a corner for details, or the sun and moon for eclipses. Double tap, or pinch your fingers, to zoom."),
         ("location.north.line.fill", "Find north", "Face north and the frame lights up orange. Face the sun and a warm line locks on. Shake your wrist to resync the compass."),
         ("gearshape.fill", "Make it yours", "Touch and hold the face for settings. Tip: turn off Wrist Flick in Settings > Gestures so shaking stays in Enoch.")]
     var body: some View {
@@ -1192,4 +1222,109 @@ struct IntroView: View {
         }
         .tabViewStyle(.verticalPage)
     }
+}
+
+
+/// Dead-on-north thickness 0...1, animated: thicken + fade in over 0.35 s on lock (under 1.5 deg), thin + fade out over
+/// 0.45 s on release (over 3 deg), each from wherever the last one stopped. Updated in the draw, every frame.
+final class DeadLock {
+    private var on = false, from = 0.0, at = Date.distantPast
+    private func value(_ now: Date) -> Double {
+        let x = max(0, min(1, now.timeIntervalSince(at) / (on ? 0.35 : 0.45))), e = x * x * (3 - 2 * x)
+        return on ? from + (1 - from) * e : from * (1 - e) }
+    func level(_ dv: Double?, _ now: Date) -> Double {
+        let want = dv.map { on ? $0 < 3 : $0 < 1.5 } ?? false
+        if want != on { from = value(now); at = now; on = want }
+        return value(now) }
+}
+
+/// Where the sun and moon were last drawn, relative to the screen centre (for tapping them).
+enum SkyHits { static var sun: CGPoint? = nil; static var moon: CGPoint? = nil }
+
+/// Eclipse dates (greatest eclipse, UT) from NASA GSFC (Espenak), bundled offline, Nov 2026 to 2039.
+enum Eclipses {
+    enum Body { case solar, lunar }
+    private static let solarRows = [
+        ("2027 Feb 06 16:00:47", "ANNULAR"),
+        ("2027 Aug 02 10:07:49", "TOTAL"),
+        ("2028 Jan 26 15:08:58", "ANNULAR"),
+        ("2028 Jul 22 02:56:39", "TOTAL"),
+        ("2029 Jan 14 17:13:47", "PARTIAL"),
+        ("2029 Jun 12 04:06:13", "PARTIAL"),
+        ("2029 Jul 11 15:37:18", "PARTIAL"),
+        ("2029 Dec 05 15:03:57", "PARTIAL"),
+        ("2030 Jun 01 06:29:13", "ANNULAR"),
+        ("2030 Nov 25 06:51:37", "TOTAL"),
+        ("2031 May 21 07:16:04", "ANNULAR"),
+        ("2031 Nov 14 21:07:30", "HYBRID"),
+        ("2032 May 09 13:26:42", "ANNULAR"),
+        ("2032 Nov 03 05:34:12", "PARTIAL"),
+        ("2033 Mar 30 18:02:35", "TOTAL"),
+        ("2033 Sep 23 13:54:31", "PARTIAL"),
+        ("2034 Mar 20 10:18:45", "TOTAL"),
+        ("2034 Sep 12 16:19:27", "ANNULAR"),
+        ("2035 Mar 09 23:05:53", "ANNULAR"),
+        ("2035 Sep 02 01:56:46", "TOTAL"),
+        ("2036 Feb 27 04:46:49", "PARTIAL"),
+        ("2036 Jul 23 10:32:06", "PARTIAL"),
+        ("2036 Aug 21 17:25:45", "PARTIAL"),
+        ("2037 Jan 16 09:48:55", "PARTIAL"),
+        ("2037 Jul 13 02:40:35", "TOTAL"),
+        ("2038 Jan 05 13:47:10", "ANNULAR"),
+        ("2038 Jul 02 13:32:54", "ANNULAR"),
+        ("2038 Dec 26 01:00:10", "TOTAL"),
+        ("2039 Jun 21 17:12:53", "ANNULAR"),
+        ("2039 Dec 15 16:23:46", "TOTAL")]
+    private static let lunarRows = [
+        ("2027 Feb 20 23:14:06", "PENUMBRAL"),
+        ("2027 Jul 18 16:04:09", "PENUMBRAL"),
+        ("2027 Aug 17 07:14:59", "PENUMBRAL"),
+        ("2028 Jan 12 04:14:13", "PARTIAL"),
+        ("2028 Jul 06 18:20:57", "PARTIAL"),
+        ("2028 Dec 31 16:53:15", "TOTAL"),
+        ("2029 Jun 26 03:23:22", "TOTAL"),
+        ("2029 Dec 20 22:43:12", "TOTAL"),
+        ("2030 Jun 15 18:34:34", "PARTIAL"),
+        ("2030 Dec 09 22:28:51", "PENUMBRAL"),
+        ("2031 May 07 03:52:02", "PENUMBRAL"),
+        ("2031 Jun 05 11:45:17", "PENUMBRAL"),
+        ("2031 Oct 30 07:46:45", "PENUMBRAL"),
+        ("2032 Apr 25 15:14:51", "TOTAL"),
+        ("2032 Oct 18 19:03:40", "TOTAL"),
+        ("2033 Apr 14 19:13:51", "TOTAL"),
+        ("2033 Oct 08 10:56:23", "TOTAL"),
+        ("2034 Apr 03 19:06:59", "PENUMBRAL"),
+        ("2034 Sep 28 02:47:37", "PARTIAL"),
+        ("2035 Feb 22 09:06:12", "PENUMBRAL"),
+        ("2035 Aug 19 01:12:15", "PARTIAL"),
+        ("2036 Feb 11 22:13:06", "TOTAL"),
+        ("2036 Aug 07 02:52:32", "TOTAL"),
+        ("2037 Jan 31 14:01:38", "TOTAL"),
+        ("2037 Jul 27 04:09:53", "PARTIAL"),
+        ("2038 Jan 21 03:49:52", "PENUMBRAL"),
+        ("2038 Jun 17 02:45:02", "PENUMBRAL"),
+        ("2038 Jul 16 11:35:56", "PENUMBRAL"),
+        ("2038 Dec 11 17:44:60", "PENUMBRAL"),
+        ("2039 Jun 06 18:54:25", "PARTIAL"),
+        ("2039 Nov 30 16:56:28", "PARTIAL")]
+    private static func parse(_ r: [(String, String)]) -> [(date: Date, kind: String)] {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyy MMM dd HH:mm:ss"
+        return r.compactMap { x in f.date(from: x.0).map { ($0, x.1) } } }
+    private static let solar = parse(solarRows), lunar = parse(lunarRows)
+    static func next(_ b: Body, after d: Date) -> (date: Date, kind: String)? { (b == .solar ? solar : lunar).first { $0.date > d } }
+    /// local calendar day, e.g. 20 FEB 2027
+    static func day(_ d: Date) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "dd MMM yyyy"; return f.string(from: d).uppercased() }
+    static func phaseName(_ p: Double) -> String {
+        let names = ["NEW", "WAXING CRESC", "FIRST QTR", "WAXING GIBB", "FULL", "WANING GIBB", "LAST QTR", "WANING CRESC"]
+        return names[Int((p / (2 * .pi) * 8 + 0.5).rounded(.down)) % 8] }
+    /// On the Enoch map the centre is the north pole: rising latitude moves inward, falling moves out towards the ice wall.
+    /// Also when it turns back (sun: next solstice, by the day; moon: next lunar standstill turn, by the hour).
+    static func trend(_ d: Date, sun: Bool) -> (inward: Bool, turns: Date?) {
+        func lat(_ t: Date) -> Double { let k = Sky(date: t); return sun ? k.sunLat : k.moonLat }
+        let step: TimeInterval = sun ? 86400 : 3600, n = sun ? 200 : 0   // moon: direction only
+        let inward = lat(d.addingTimeInterval(step)) > lat(d)
+        var prev = lat(d), t = d
+        for _ in 0..<n { t = t.addingTimeInterval(step); let v = lat(t); if (v > prev) != inward { return (inward, t.addingTimeInterval(-step)) }; prev = v }
+        return (inward, nil) }
 }
