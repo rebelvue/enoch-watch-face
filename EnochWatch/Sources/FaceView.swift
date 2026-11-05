@@ -234,8 +234,8 @@ struct FaceView: View {
 
     var body: some View {
         Group {
-            if aod && fadeAt == .distantPast { TimelineView(.everyMinute) { ctx in face(ctx.date, true).redNight(redOn).overlay { redDigits(ctx.date, 1) }.onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
-            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : idle ? 1.0 / 8 : 1.0 / 24)) { ctx in blend(ctx.date).redNight(redOn).overlay { redDigits(ctx.date, mix(ctx.date)) }.onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
+            if aod && fadeAt == .distantPast { TimelineView(.everyMinute) { ctx in face(ctx.date, true).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
+            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : idle ? 1.0 / 8 : 1.0 / 24)) { ctx in blend(ctx.date).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -259,7 +259,7 @@ struct FaceView: View {
         .onTapGesture(count: 2) { toggleZoom() }
         .onLongPressGesture(minimumDuration: 0.6) { if !aod { detail = nil; holdKnown = true; hintUntil = .distantPast; WKInterfaceDevice.current().play(.click); showSettings = true } }
         .sheet(isPresented: $showSettings, onDismiss: { crownFocus = true }) { SettingsView(loc: loc) }
-        .overlay { if !onboarded { IntroView { onboarded = true; crownFocus = true }.background(Color.black).transition(.opacity) } }
+        .overlay { if !onboarded { IntroView { onboarded = true; crownFocus = true }.background(Color.black).redNight(redOn).transition(.opacity) } }
         .onTapGesture(count: 1, coordinateSpace: .local) { p in tap(p) }
         // crown idle 2 s: spring back to now; detail card times out after 6 s; drop to 30 fps once settled
         .task {
@@ -417,26 +417,13 @@ struct FaceView: View {
     }
 
     private var redOn: Bool { redMode == 1 || (redMode == 0 && red) }
-    /// Red night only (Levi, 2026-11-05): brighter red, stronger Liquid Glass digits drawn over the red-filtered face,
-    /// so the time stays readable. m = always-on mix (0 active, 1 always-on).
-    @ViewBuilder private func redDigits(_ now: Date, _ m: Double) -> some View {
-        if redOn {
-            let date = now.addingTimeInterval(m >= 1 ? 0 : sc.x * 3600)
-            ZStack {
-                if m < 1 { RedGlassTime(date: date, tilt: motion.read(now), aod: false).opacity(1 - m) }
-                if m > 0 { RedGlassTime(date: date, aod: true).opacity(m) }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity).ignoresSafeArea().allowsHitTesting(false)
-        }
-    }
-
     /// Animated frame: the active face, the always-on face, or both cross-fading; north frame on top (active only).
     @ViewBuilder private func blend(_ now: Date) -> some View {
         let m = mix(now)
         ZStack {
             if m < 1 { face(now, false).opacity(1 - m) }
             if m > 0 { face(now, true).opacity(m) }
-            if m < 1 { Canvas { g, size in northFrame(&g, size, now) }.opacity(1 - m).allowsHitTesting(false).zIndex(10) }
+            if m < 1 { Canvas { g, size in northFrame(&g, size, now) }.redNight(redOn).opacity(1 - m).allowsHitTesting(false).zIndex(10) }
         }
     }
 
@@ -539,17 +526,19 @@ struct FaceView: View {
         ZStack {
             // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon, comps and text
             // always-on: everything greyscale and flat, except the sun and moon (layer 5, full colour)
-            Canvas { g, size in draw(&g, size, date, 0, 0, a) }.spun(spin).aodGrey(a)
-            if !a { Canvas { g, size in sweep(&g, size, now) }.zIndex(0.5).allowsHitTesting(false) }
-            if !a { Canvas { g, size in hourGlow(&g, size, now) }.zIndex(0.7).allowsHitTesting(false) }
-            if !a { Canvas { g, size in compassMarks(&g, size, now) }.zIndex(4.2).allowsHitTesting(false) }
-            if !a { Canvas { g, size in sunLock(&g, size, now) }.zIndex(3.2).allowsHitTesting(false) }
-            GlassTime(date: date, tilt: tilt, aod: a).aodGrey(a).zIndex(1) // digits fixed (no parallax, Levi 2026-11-05); light still follows the wrist
-            Canvas { g, size in draw(&g, size, date, 3, 0, a) }.spun(spin).offset(Self.px(tilt, 6)).aodGrey(a).zIndex(2).allowsHitTesting(false)
-            Canvas { g, size in draw(&g, size, date, 1, 0, a) }.spun(spin).aodGrey(a).zIndex(3).allowsHitTesting(false)
-            if a { Canvas { g, size in draw(&g, size, date, 5, 0, a) }.spun(spin).zIndex(3.5).allowsHitTesting(false) }
-            Canvas { g, size in draw(&g, size, date, 2, off, a) }.offset(Self.px(tilt, 3)).aodGrey(a).zIndex(4).allowsHitTesting(false)
-            if let k = detail { card(k, date).zIndex(5) }
+            Canvas { g, size in draw(&g, size, date, 0, 0, a) }.spun(spin).aodGrey(a).redNight(redOn)
+            if !a { Canvas { g, size in sweep(&g, size, now) }.redNight(redOn).zIndex(0.5).allowsHitTesting(false) }
+            if !a { Canvas { g, size in hourGlow(&g, size, now) }.redNight(redOn).zIndex(0.7).allowsHitTesting(false) }
+            if !a { Canvas { g, size in compassMarks(&g, size, now) }.redNight(redOn).zIndex(4.2).allowsHitTesting(false) }
+            if !a { Canvas { g, size in sunLock(&g, size, now) }.redNight(redOn).zIndex(3.2).allowsHitTesting(false) }
+            // red night: bright red glass digits in the digits' own place in the stack, outside the red filter (Levi 2026-11-05)
+            if redOn { RedGlassTime(date: date, tilt: tilt, aod: a).zIndex(1) }
+            else { GlassTime(date: date, tilt: tilt, aod: a).aodGrey(a).zIndex(1) } // digits fixed (no parallax, Levi 2026-11-05); light still follows the wrist
+            Canvas { g, size in draw(&g, size, date, 3, 0, a) }.spun(spin).offset(Self.px(tilt, 6)).aodGrey(a).redNight(redOn).zIndex(2).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 1, 0, a) }.spun(spin).aodGrey(a).redNight(redOn).zIndex(3).allowsHitTesting(false)
+            if a { Canvas { g, size in draw(&g, size, date, 5, 0, a) }.spun(spin).redNight(redOn).zIndex(3.5).allowsHitTesting(false) }
+            Canvas { g, size in draw(&g, size, date, 2, off, a) }.offset(Self.px(tilt, 3)).aodGrey(a).redNight(redOn).zIndex(4).allowsHitTesting(false)
+            if let k = detail { card(k, date).redNight(redOn).zIndex(5) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
