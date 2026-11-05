@@ -1167,7 +1167,7 @@ struct SettingsView: View {
 struct IntroView: View {
     let done: () -> Void
     private let pages: [(String, String, String)] = [
-        ("globe.europe.africa.fill", "Your world", "The map is the face. The dot is you, the glow is the sun right now."),
+        ("", "Your world", "The map is the face. The dot is you, the glow is the sun right now."),
         ("digitalcrown.arrow.clockwise.fill", "Travel in time", "Turn the crown to move the sun and the night. Let go and it springs back to now."),
         ("hand.tap.fill", "Tap and zoom", "Tap a corner for details. Double tap, or pinch your fingers, to zoom the map."),
         ("location.north.line.fill", "Find north", "Face north and the frame lights up orange. Face the sun and a warm line locks on. Shake your wrist to resync the compass."),
@@ -1176,7 +1176,13 @@ struct IntroView: View {
         TabView {
             ForEach(pages.indices, id: \.self) { i in
                 VStack(spacing: 6) {
-                    Image(systemName: pages[i].0).font(.system(size: 30, weight: .semibold)).foregroundStyle(FaceView.orange)
+                    if i == 0 {
+                        // the real map, not an icon
+                        Image("disc").resizable().scaledToFit().frame(width: 62, height: 62).clipShape(Circle())
+                            .overlay(Circle().stroke(FaceView.orange.opacity(0.6), lineWidth: 1))
+                    } else {
+                        Image(systemName: pages[i].0).font(.system(size: 30, weight: .semibold)).foregroundStyle(FaceView.orange)
+                    }
                     Text(pages[i].1).font(.system(.headline, design: .rounded))
                     Text(pages[i].2).font(.system(size: 13)).multilineTextAlignment(.center).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if i == pages.count - 1 { Button("Start", action: done).tint(FaceView.orange).padding(.top, 4) }
