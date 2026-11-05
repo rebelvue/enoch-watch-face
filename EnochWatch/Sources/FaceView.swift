@@ -221,6 +221,26 @@ struct FaceView: View {
 
     static let scr = WKInterfaceDevice.current().screenBounds.size
 
+    /// Radar sweep as the seconds hand: one turn a minute from 12 o'clock, fixed to the screen (does not turn with the compass),
+    /// live time (not crown-scrubbed), with a fading trail behind the beam. Not drawn in always-on.
+    private func sweep(_ g: inout GraphicsContext, _ size: CGSize, _ now: Date) {
+        let c = CGPoint(x: size.width / 2, y: size.height / 2), R = (min(Self.scr.width, Self.scr.height) / 2 - 4) * zs.x
+        let sec = now.timeIntervalSince1970.truncatingRemainder(dividingBy: 60)
+        let a = (sec * 6 - 90) * Double.pi / 180            // screen angle, 0 = 3 o'clock, clockwise
+        let acc = Color(red: 0.75, green: 0.96, blue: 0.82), trail = 50.0 / 360
+        let disc = Path(ellipseIn: CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R))
+        g.drawLayer { l in
+            l.clip(to: disc)
+            // trail: conic gradient starting at the beam, so the part just behind it (counter-clockwise) is the brightest
+            l.fill(disc, with: .conicGradient(Gradient(stops: [
+                .init(color: .clear, location: 0), .init(color: .clear, location: 1 - trail),
+                .init(color: acc.opacity(0.28), location: 1)]), center: c, angle: .radians(a)))
+            var beam = Path(); beam.move(to: c); beam.addLine(to: CGPoint(x: c.x + R * cos(a), y: c.y + R * sin(a)))
+            l.stroke(beam, with: .color(acc.opacity(0.35)), lineWidth: 3)   // soft glow
+            l.stroke(beam, with: .color(acc), lineWidth: 1)
+        }
+    }
+
     private static func px(_ t: CGPoint, _ k: Double) -> CGSize { CGSize(width: t.x * k, height: -t.y * k) }
 
     /// One frame. Map, grid, day/night shading, stars, sun and moon stay fixed; only digits, outlines and text float with wrist tilt
@@ -236,6 +256,7 @@ struct FaceView: View {
             // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon, comps and text
             // always-on: everything greyscale and flat, except the sun and moon (layer 5, full colour)
             Canvas { g, size in draw(&g, size, date, 0) }.spun(spin).aodGrey(aod)
+            if !aod { Canvas { g, size in sweep(&g, size, now) }.zIndex(0.5).allowsHitTesting(false) }
             GlassTime(date: date, tilt: tilt, aod: aod).offset(Self.px(tilt, 11)).aodGrey(aod).zIndex(1)
             Canvas { g, size in draw(&g, size, date, 3) }.spun(spin).offset(Self.px(tilt, 6)).aodGrey(aod).zIndex(2).allowsHitTesting(false)
             Canvas { g, size in draw(&g, size, date, 1) }.spun(spin).aodGrey(aod).zIndex(3).allowsHitTesting(false)
@@ -365,7 +386,7 @@ struct FaceView: View {
             // night side: solar elevation on the globe, sampled on a coarse grid
             // smooth shading: per-cell values go into two small bitmaps that are drawn scaled up with
             // interpolation, so there are no cell squares or seams (filled cells used to overlap into a visible grid)
-            if let sh = Self.shade(n: 64, sunLat: sky.sunLat * d, sunLon: sky.sunLon * d, nightMax: aod ? 0.93 : 0.90) {
+            if let sh = Self.shade(n: 64, sunLat: sky.sunLat * d, sunLon: sky.sunLon * d, nightMax: aod ? 0.93 : 0.80) {
                 l.draw(Image(decorative: sh.0, scale: 1).interpolation(.high), in: disc)
                 l.blendMode = .screen; l.draw(Image(decorative: sh.1, scale: 1).interpolation(.high), in: disc); l.blendMode = .normal
             }
@@ -505,7 +526,7 @@ struct FaceView: View {
             let e = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)
             var t = min(1, max(0, (e + 0.309) / 0.517)); t = t * t * (3 - 2 * t)
             let k = (j * n + i) * 4
-            // night: deep navy (8, 14, 32), premultiplied; active 0.90 (lands faintly visible), always-on 0.93
+            // night: deep navy (8, 14, 32), premultiplied; active 0.80 (lands visible but still night, Levi 2026-11-05), always-on 0.93
             let na = 255 * nightMax * (1 - t)
             night[k] = UInt8(na * 8 / 255); night[k + 1] = UInt8(na * 14 / 255); night[k + 2] = UInt8(na * 32 / 255); night[k + 3] = UInt8(na)
             let a = 255 * t, v = UInt8(a * 0.12); day[k] = v; day[k + 1] = v; day[k + 2] = v; day[k + 3] = UInt8(a)

@@ -158,8 +158,8 @@ function draw(){var now=new Date(Date.now()+TOFF+SCS),S=sky(now.getTime());R=R0*
  for(var j=0;j<N;j++)for(var i=0;i<N;i++){var dx=(i+.5)/N*2-1,dy=(j+.5)/N*2-1,r=Math.hypot(dx,dy),k=(j*N+i)*4;if(r>1.02)continue;
   var la=(90-Math.min(r,1)*180)*D,lo=Math.atan2(dx,dy),c=Math.sin(la)*Math.sin(sl)+Math.cos(la)*Math.cos(sl)*Math.cos(lo-so);
   var t=Math.min(1,Math.max(0,(c+.309)/.517)); /* wide twilight feather: sun elevation -18 to +12 deg, no edge */t=t*t*(3-2*t);img.data[k]=img.data[k+1]=img.data[k+2]=255;img.data[k+3]=Math.round(255*t);
-  // active mode, same as the watch: navy rgb(8,14,32) at 0.90*(1-t) over the original map, faint 0.12 screen lift on the day side
-  var na=.9*(1-t);ni.data[k]=8;ni.data[k+1]=14;ni.data[k+2]=32;ni.data[k+3]=Math.round(255*na);di.data[k]=di.data[k+1]=di.data[k+2]=31;di.data[k+3]=Math.round(255*t);}
+  // active mode, same as the watch: navy rgb(8,14,32) at 0.80*(1-t) over the original map, faint 0.12 screen lift on the day side
+  var na=.8*(1-t);ni.data[k]=8;ni.data[k+1]=14;ni.data[k+2]=32;ni.data[k+3]=Math.round(255*na);di.data[k]=di.data[k+1]=di.data[k+2]=31;di.data[k+3]=Math.round(255*t);}
  sh.putImageData(img,0,0);nsh.putImageData(ni,0,0);dsh.putImageData(di,0,0);
  if(!AOD&&disc.complete&&disc.naturalWidth){g.imageSmoothingEnabled=true;g.drawImage(disc,CX-R,CY-R,2*R,2*R);g.drawImage(nShCv,CX-R,CY-R,2*R,2*R);
   g.globalCompositeOperation='screen';g.drawImage(dShCv,CX-R,CY-R,2*R,2*R);g.globalCompositeOperation='source-over';}
