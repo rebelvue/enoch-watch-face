@@ -146,7 +146,13 @@ struct FaceView: View {
     @Environment(\.isLuminanceReduced) private var lum
     @Environment(\.scenePhase) private var phase
     @State private var lowCadence = false
-    private var aod: Bool { lum || lowCadence || phase != .active }
+    /// system always-on: luminance reduced, low timeline cadence, or the scene not active
+    private var sysAOD: Bool { lum || lowCadence || phase != .active }
+    /// wrist turned away / arm down (gravity), detected while the screen is still awake: switch to the always-on look right away
+    /// instead of waiting for watchOS. Motion keeps running only until the system itself enters always-on.
+    @State private var away = false
+    @State private var awayDet = AwayDetector()
+    private var aod: Bool { sysAOD || away }
     @State private var crown: Double = 0
     @State private var zt: Double = 1                       // zoom target
     @State private var zs = ZoomSpring()
@@ -162,7 +168,7 @@ struct FaceView: View {
 
     private func setCadence(_ c: TimelineViewDefaultContext.Cadence) {
         let low = c != .live; if low != lowCadence { lowCadence = low; logAOD(c) } }
-    private func logAOD(_ c: Any? = nil) { print("AOD flag changed: lum=\(lum) cadence=\(c.map { "\($0)" } ?? (lowCadence ? "low" : "live")) phase=\(phase) -> aod=\(aod)") }
+    private func logAOD(_ c: Any? = nil) { print("AOD flag changed: lum=\(lum) cadence=\(c.map { "\($0)" } ?? (lowCadence ? "low" : "live")) phase=\(phase) away=\(away) -> aod=\(aod)") }
 
     var body: some View {
         Group {
@@ -197,8 +203,9 @@ struct FaceView: View {
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 100_000_000)
-                if aod { continue }
                 let now = Date()
+                if !sysAOD { let a = awayDet.update(motion.gz, now); if a != away { away = a } }
+                if aod { continue }
                 if scrub != 0 && now.timeIntervalSince(crownAt) > 2 { scrub = 0 }
                 if detail != nil && now.timeIntervalSince(detailAt) > 6 { detail = nil }
                 let f = zs.moving || sc.moving || rs.moving || now.timeIntervalSince(crownAt) < 0.3
@@ -209,7 +216,9 @@ struct FaceView: View {
         .onAppear { zt = min(fillZoom, max(1, zoom)); zs.reset(zt); if !aod { motion.start(); loc.wake() }; crownFocus = true; WKInterfaceDevice.current().isBatteryMonitoringEnabled = true }
         .onChange(of: lum) { logAOD() }
         .onChange(of: phase) { logAOD() }
-        .onChange(of: aod) { _, v in if v { motion.stop(); hr.pause(); loc.sleep(); scrub = 0; detail = nil } else { motion.start(); hr.resume(); loc.wake(); fetchTemp(loc.coord) } }
+        .onChange(of: aod) { _, v in logAOD(); if v { hr.pause(); loc.sleep(); scrub = 0; detail = nil } else { hr.resume(); loc.wake() } }
+        // battery rule: no motion once watchOS is in always-on; back on wrist raise (which also clears the early-dim flag)
+        .onChange(of: sysAOD) { _, v in if v { motion.stop() } else { away = false; awayDet.reset(); motion.start(); fetchTemp(loc.coord) } }
         // weather fetch lives outside the draw path: every 12 min, and when the location moves
         .task { while !Task.isCancelled { if !aod { fetchTemp(loc.coord) }; try? await Task.sleep(nanoseconds: 720_000_000_000) } }
         .onChange(of: loc.live) { _ in fetchTemp(loc.coord) }
@@ -647,6 +656,8 @@ final class Motion {
     private var raw: CGPoint = .zero, sp: CGPoint = .zero, v: CGPoint = .zero, last: Date? = nil
     private let mm = CMMotionManager()
     private(set) var source = "none"
+    /// gravity along the screen normal, smoothed: about -1 face up toward you, 0 on edge (arm hanging), +1 face down
+    private(set) var gz: Double = -1
     func start() {
         #if targetEnvironment(simulator)
         source = "simulator"; return
@@ -659,11 +670,11 @@ final class Motion {
         if mm.isDeviceMotionAvailable {
             guard !mm.isDeviceMotionActive else { return }
             source = "deviceMotion"; mm.deviceMotionUpdateInterval = 1.0 / 60
-            mm.startDeviceMotionUpdates(to: .main) { m, _ in if let gr = m?.gravity { feed(gr.x, gr.y) } }
+            mm.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in if let gr = m?.gravity { feed(gr.x, gr.y); self?.feedZ(gr.z) } }
         } else if mm.isAccelerometerAvailable {
             guard !mm.isAccelerometerActive else { return }
             source = "accelerometer"; mm.accelerometerUpdateInterval = 1.0 / 60
-            mm.startAccelerometerUpdates(to: .main) { a, _ in if let a = a?.acceleration { feed(a.x, a.y) } }
+            mm.startAccelerometerUpdates(to: .main) { [weak self] a, _ in if let a = a?.acceleration { feed(a.x, a.y); self?.feedZ(a.z) } }
         }
         print("EnochWatch motion source:", source)
         #endif
@@ -692,7 +703,8 @@ final class Motion {
             sp.x += v.x * h; sp.y += v.y * h }
         return sp
     }
-    func stop() { mm.stopDeviceMotionUpdates(); mm.stopAccelerometerUpdates() }
+    private func feedZ(_ z: Double) { gz += (max(-1, min(1, z)) - gz) * 0.25 }
+    func stop() { mm.stopDeviceMotionUpdates(); mm.stopAccelerometerUpdates(); gz = -1 }
 }
 
 /// Critically-tuned spring (response 0.35 s, damping 0.65: a small visible overshoot), integrated per frame.
@@ -703,6 +715,19 @@ extension View {
     func spun(_ deg: Double) -> some View {
         let s = FaceView.scr, d = ceil(hypot(s.width, s.height)) + 4
         return self.frame(width: d, height: d).rotationEffect(.degrees(deg)).frame(width: s.width, height: s.height)
+    }
+}
+
+/// Early always-on: "away" once the screen tilts more than about 70 degrees from facing you (wrist turned, arm by your side)
+/// for 0.4 s; back once it faces you again (under about 55 degrees) for 0.15 s. The gap between the two stops flicker.
+final class AwayDetector {
+    private var away = false, since: Date? = nil
+    func reset() { away = false; since = nil }
+    func update(_ gz: Double, _ now: Date) -> Bool {
+        let flip = away ? gz < -0.57 : gz > -0.34
+        if flip { if since == nil { since = now }; if now.timeIntervalSince(since!) >= (away ? 0.15 : 0.4) { away.toggle(); since = nil } }
+        else { since = nil }
+        return away
     }
 }
 
