@@ -8,7 +8,11 @@ import CoreMotion
 /// City label comes from the bundled GeoNames list (cities.tsv, CC BY 4.0), country from countries.json, so both work offline and mid-flight.
 /// Updates run only while the face is active (wrist up); always-on stops them (battery rule).
 final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
-    @Published var coord = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548) // fallback: Santandrei, Bihor, Romania (home)
+    /// fallback until the first satellite fix: the home set in Settings (default Santandrei, Bihor, Romania)
+    @Published var coord: CLLocationCoordinate2D = {
+        let d = UserDefaults.standard
+        return d.object(forKey: "enochHomeLat") == nil ? CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
+            : CLLocationCoordinate2D(latitude: d.double(forKey: "enochHomeLat"), longitude: d.double(forKey: "enochHomeLon")) }()
     @Published var live = false
     @Published var place: String? = nil
     /// compass heading, degrees clockwise from true north (magnetic when there is no fix yet); nil until the first reading
@@ -147,6 +151,10 @@ struct FaceView: View {
     // map zoom: 1 = whole disc, fillZoom = disc covers the whole screen (radius = half the diagonal)
     @FocusState private var crownFocus: Bool
     @AppStorage("enochZoom") private var zoom: Double = 1
+    // settings (touch and hold the face) and first-run intro
+    @AppStorage("enochRedMode") private var redMode = 0      // 0 auto (sun below -4 deg), 1 always, 2 off
+    @AppStorage("enochOnboarded") private var onboarded = false
+    @State private var showSettings = false
     private let fillZoom: Double = {
         let b = WKInterfaceDevice.current().screenBounds.size
         return hypot(b.width, b.height) / 2 / (min(b.width, b.height) / 2 - 4)
@@ -239,6 +247,9 @@ struct FaceView: View {
             scrub = max(-720, min(720, scrub + dv * hoursPerUnit))
         }
         .onTapGesture(count: 2) { toggleZoom() }
+        .onLongPressGesture(minimumDuration: 0.6) { if !aod { detail = nil; WKInterfaceDevice.current().play(.click); showSettings = true } }
+        .sheet(isPresented: $showSettings, onDismiss: { crownFocus = true }) { SettingsView(loc: loc) }
+        .fullScreenCover(isPresented: Binding(get: { !onboarded }, set: { if !$0 { onboarded = true } }), onDismiss: { crownFocus = true }) { IntroView { onboarded = true } }
         .onTapGesture(count: 1, coordinateSpace: .local) { p in tap(p) }
         // crown idle 2 s: spring back to now; detail card times out after 6 s; drop to 30 fps once settled
         .task {
@@ -274,7 +285,7 @@ struct FaceView: View {
                 if f != fast { fast = f }
             }
         }
-        .redNight(red)
+        .redNight(redMode == 1 || (redMode == 0 && red))
         .background {
             // Series 9/10 and Ultra 2 double tap (index finger + thumb): same zoom as tapping the screen twice
             if #available(watchOS 11.0, *) {
@@ -1036,13 +1047,15 @@ struct DigitsShape: Shape {
 /// lensing, adaptive tint and light-following rim itself. No extra shadows, strokes or fills.
 struct GlassTime: View {
     @Namespace private var glassNS
+    @AppStorage("enoch12h") private var h12 = false
     let date: Date
     var tilt: CGPoint = .zero // smoothed gravity x/y, -1...1
     var aod = false
     var body: some View {
         GeometryReader { geo in
             let cal = Calendar.current
-            let hh = String(format: "%02d", cal.component(.hour, from: date)), mm = String(format: "%02d", cal.component(.minute, from: date))
+            let h = cal.component(.hour, from: date)
+            let hh = String(format: "%02d", h12 ? (h + 11) % 12 + 1 : h), mm = String(format: "%02d", cal.component(.minute, from: date))
             let fs = min(geo.size.width * 0.78 / 1.2, geo.size.height * 0.36)
             let shape = DigitsShape(hh: hh, mm: mm, fs: fs)
             // Liquid Glass, clear variant: no white fill; the system lenses and refracts the map through the glyphs.
@@ -1107,3 +1120,59 @@ extension View {
 
 /// Rendered comp text bands keyed by rim angle: (inner radius, outer radius, half angular width in radians). Written while drawing.
 enum CompHits { static var bands: [Double: (Double, Double, Double)] = [:] }
+
+
+/// Settings: touch and hold the face. Plain watchOS list, orange accents.
+struct SettingsView: View {
+    @ObservedObject var loc: Locator
+    @AppStorage("enoch12h") private var h12 = false
+    @AppStorage("enochRedMode") private var redMode = 0
+    @AppStorage("enochOnboarded") private var onboarded = true
+    @AppStorage("enochHomeLat") private var homeLat: Double = 47.0682
+    @AppStorage("enochHomeLon") private var homeLon: Double = 21.8548
+    @State private var homeSaved = false
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Time") { Toggle("12-hour digits", isOn: $h12).tint(FaceView.orange) }
+                Section {
+                    Picker("Red night mode", selection: $redMode) { Text("Auto").tag(0); Text("Always").tag(1); Text("Off").tag(2) }
+                } footer: { Text("Auto turns red once the sun is 4\u{00B0} below your horizon.") }
+                Section {
+                    Button { homeLat = loc.coord.latitude; homeLon = loc.coord.longitude; homeSaved = true; WKInterfaceDevice.current().play(.success) } label: {
+                        Label(homeSaved ? "Home saved" : "Set home here", systemImage: homeSaved ? "checkmark" : "house") }
+                        .disabled(!loc.live)
+                } header: { Text("Home") } footer: { Text(loc.live ? "Used before the first GPS fix." : "Waiting for a GPS fix.") }
+                Section { Button { onboarded = false; dismiss() } label: { Label("Show intro again", systemImage: "sparkles") } }
+            }
+            .navigationTitle("Enoch")
+        }
+        .tint(FaceView.orange)
+    }
+}
+
+/// First-run intro: four short pages, swipe up/down (vertical paging), last page has the start button.
+struct IntroView: View {
+    let done: () -> Void
+    private let pages: [(String, String, String)] = [
+        ("globe.europe.africa.fill", "Your world", "The map is the face. The dot is you, the glow is the sun right now."),
+        ("digitalcrown.arrow.clockwise.fill", "Travel in time", "Turn the crown to move the sun and the night. Let go and it springs back to now."),
+        ("hand.tap.fill", "Tap and zoom", "Tap a corner for details. Double tap, or pinch your fingers, to zoom the map."),
+        ("location.north.line.fill", "Find north", "Face north and the frame lights up orange. Face the sun and a warm line locks on. Shake your wrist to resync the compass."),
+        ("gearshape.fill", "Make it yours", "Touch and hold the face for settings. Tip: turn off Wrist Flick in Settings > Gestures so shaking stays in Enoch.")]
+    var body: some View {
+        TabView {
+            ForEach(pages.indices, id: \.self) { i in
+                VStack(spacing: 6) {
+                    Image(systemName: pages[i].0).font(.system(size: 30, weight: .semibold)).foregroundStyle(FaceView.orange)
+                    Text(pages[i].1).font(.system(.headline, design: .rounded))
+                    Text(pages[i].2).font(.system(size: 13)).multilineTextAlignment(.center).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if i == pages.count - 1 { Button("Start", action: done).tint(FaceView.orange).padding(.top, 4) }
+                }
+                .padding(.horizontal, 8)
+            }
+        }
+        .tabViewStyle(.verticalPage)
+    }
+}
