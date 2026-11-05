@@ -13,6 +13,8 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var place: String? = nil
     /// compass heading, degrees clockwise from true north (magnetic when there is no fix yet); nil until the first reading
     @Published var heading: Double? = nil
+    /// heading accuracy in degrees; negative = invalid, the compass needs calibration
+    @Published var headingAcc: Double = -1
     private var placeAt: CLLocation? = nil
     private let m = CLLocationManager()
     private var wanted = false
@@ -35,6 +37,7 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     /// always-on / inactive: GPS off
     func sleep() { wanted = false; m.stopUpdatingLocation(); m.stopUpdatingHeading() }
     func locationManager(_ m: CLLocationManager, didUpdateHeading h: CLHeading) {
+        if abs(h.headingAccuracy - headingAcc) >= 1 || (h.headingAccuracy < 0) != (headingAcc < 0) { headingAcc = h.headingAccuracy }
         guard h.headingAccuracy >= 0 else { return } // negative = invalid (needs calibration)
         heading = h.trueHeading >= 0 ? h.trueHeading : h.magneticHeading }
     func locationManagerDidChangeAuthorization(_ m: CLLocationManager) { if wanted { wake() } }
@@ -172,6 +175,11 @@ struct FaceView: View {
     @State private var northAt = Date.distantPast
     @State private var northOffAt = Date.distantPast
     @State private var northFrom = 0.0
+    // compass marks: smoothed screen angle of real north on the rim
+    @State private var ns = ZoomSpring(response: 0.45, damping: 1)
+    @State private var nrot = CompassTarget()
+    // red night mode: on while the sun is more than 4 degrees below the horizon where you are
+    @State private var red = false
 
     private func setCadence(_ c: TimelineViewDefaultContext.Cadence) {
         let low = c != .live; if low != lowCadence { lowCadence = low; logAOD(c) } }
@@ -201,10 +209,7 @@ struct FaceView: View {
             let hoursPerUnit = min(12, 0.17 * (1 + pow(speed, 1.6) * 0.6))
             scrub = max(-720, min(720, scrub + dv * hoursPerUnit))
         }
-        .onTapGesture(count: 2) {
-            detail = nil
-            zt = zt < (1 + fillZoom) / 2 ? fillZoom : 1; zoom = zt; fast = true
-        }
+        .onTapGesture(count: 2) { toggleZoom() }
         .onTapGesture(count: 1, coordinateSpace: .local) { p in tap(p) }
         // crown idle 2 s: spring back to now; detail card times out after 6 s; drop to 30 fps once settled
         .task {
@@ -213,6 +218,8 @@ struct FaceView: View {
                 let now = Date()
                 if !sysAOD { let a = awayDet.update(motion.gz, now); if a != away { away = a } }
                 if fadeAt != .distantPast && now.timeIntervalSince(fadeAt) > 0.55 { fadeAt = .distantPast }
+                let alt = sunAlt(now), r = red ? alt < -3 : alt < -4   // 1 degree of hysteresis
+                if r != red { red = r }
                 if aod { if northOn { northOn = false; northOffAt = .distantPast }; continue }
                 if let h = loc.heading {
                     let dv = min(Self.m360(h), 360 - Self.m360(h)), on = northOn ? dv < 14 : dv < 8
@@ -222,6 +229,13 @@ struct FaceView: View {
                 if detail != nil && now.timeIntervalSince(detailAt) > 6 { detail = nil }
                 let f = zs.moving || sc.moving || rs.moving || now.timeIntervalSince(crownAt) < 0.3
                 if f != fast { fast = f }
+            }
+        }
+        .redNight(red)
+        .background {
+            // Series 9/10 and Ultra 2 double tap (index finger + thumb): same zoom as tapping the screen twice
+            if #available(watchOS 11.0, *) {
+                Button("Zoom") { toggleZoom() }.buttonStyle(.plain).foregroundStyle(.clear).handGestureShortcut(.primaryAction)
             }
         }
         .background(Color.black)
@@ -241,6 +255,44 @@ struct FaceView: View {
     }
 
     static let scr = WKInterfaceDevice.current().screenBounds.size
+
+    private func toggleZoom() {
+        detail = nil
+        zt = zt < (1 + fillZoom) / 2 ? fillZoom : 1; zoom = zt; fast = true
+    }
+
+    /// Sun altitude (deg) at your position, live time.
+    private func sunAlt(_ now: Date) -> Double {
+        let d = Double.pi / 180, sky = Sky(date: now), la = loc.coord.latitude * d, dec = sky.sunLat * d
+        let ha = (loc.coord.longitude - sky.sunLon) * d
+        return asin(sin(la) * sin(dec) + cos(la) * cos(dec) * cos(ha)) / d
+    }
+
+    /// Compass marks (active look, fixed to the screen): an orange N on the rim where true north really is, the heading
+    /// in degrees above the coordinates, and a pulsing CAL tag when the watch says the compass needs calibrating.
+    private func compassMarks(_ g: inout GraphicsContext, _ size: CGSize, _ now: Date) {
+        let c = CGPoint(x: size.width / 2, y: size.height / 2), R = min(Self.scr.width, Self.scr.height) / 2 - 4, o = FaceView.orange
+        let acc = loc.headingAcc, bad = acc < 0 || acc > 25
+        let mono = { (s: CGFloat) in Font.system(size: s, weight: .heavy, design: .monospaced) }
+        if let h = loc.heading {
+            let b = ns.step(to: nrot.unwrap(-h), at: now) * .pi / 180, ux = sin(b), uy = -cos(b)
+            g.opacity = bad ? 0.4 : 1
+            // small triangle on the rim pointing out, the letter just inside it
+            let tip = CGPoint(x: c.x + R * ux, y: c.y + R * uy), base = CGPoint(x: c.x + (R - 7) * ux, y: c.y + (R - 7) * uy)
+            var tri = Path(); tri.move(to: tip)
+            tri.addLine(to: CGPoint(x: base.x - 3.5 * uy, y: base.y + 3.5 * ux)); tri.addLine(to: CGPoint(x: base.x + 3.5 * uy, y: base.y - 3.5 * ux)); tri.closeSubpath()
+            g.fill(tri, with: .color(o))
+            g.draw(g.resolve(Text("N").font(mono(9)).foregroundColor(o)), at: CGPoint(x: c.x + (R - 14) * ux, y: c.y + (R - 14) * uy), anchor: .center)
+            g.opacity = 1
+            let hd = Int(Self.m360(h).rounded()) % 360, card = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Int((Double(hd) + 22.5) / 45) % 8]
+            g.draw(g.resolve(Text("\(card) ").font(mono(9)).foregroundColor(o) + Text("\(hd)\u{00B0}").font(mono(9)).foregroundColor(.white)),
+                   at: CGPoint(x: c.x, y: size.height - 24), anchor: .center)
+        }
+        if bad {
+            let p = 0.55 + 0.45 * sin(now.timeIntervalSince1970 * 4)
+            g.draw(g.resolve(Text("CAL \u{221E}").font(mono(8)).foregroundColor(o.opacity(p))), at: CGPoint(x: c.x, y: size.height - 34), anchor: .center)
+        }
+    }
     static func m360(_ x: Double) -> Double { let y = fmod(x, 360); return y < 0 ? y + 360 : y }
 
     /// 0 = active look, 1 = always-on look; eased over 0.5 s after every switch (no fade when watchOS itself dims)
@@ -336,6 +388,7 @@ struct FaceView: View {
             Canvas { g, size in draw(&g, size, date, 0, 0, a) }.spun(spin).aodGrey(a)
             if !a { Canvas { g, size in sweep(&g, size, now) }.zIndex(0.5).allowsHitTesting(false) }
             if !a { Canvas { g, size in hourGlow(&g, size, now) }.zIndex(0.7).allowsHitTesting(false) }
+            if !a { Canvas { g, size in compassMarks(&g, size, now) }.zIndex(4.2).allowsHitTesting(false) }
             GlassTime(date: date, tilt: tilt, aod: a).offset(Self.px(tilt, 11)).aodGrey(a).zIndex(1)
             Canvas { g, size in draw(&g, size, date, 3, 0, a) }.spun(spin).offset(Self.px(tilt, 6)).aodGrey(a).zIndex(2).allowsHitTesting(false)
             Canvas { g, size in draw(&g, size, date, 1, 0, a) }.spun(spin).aodGrey(a).zIndex(3).allowsHitTesting(false)
@@ -909,6 +962,11 @@ struct GlassTime: View {
 /// Always-on only: greyscale. In active mode the view is returned untouched (no saturation pass at all),
 /// so the wrist-up face is exactly the full-colour render.
 extension View {
+    /// Red night mode: brightness kept as luminance, re-coloured to a dim red (no blue or green light).
+    /// Off = view untouched (no extra render pass over the Liquid Glass digits).
+    @ViewBuilder func redNight(_ on: Bool) -> some View {
+        if on { self.saturation(0).colorMultiply(Color(red: 0.82, green: 0.07, blue: 0.03)) } else { self }
+    }
     @ViewBuilder func aodGrey(_ on: Bool) -> some View { if on { self.saturation(0) } else { self } }
 }
 
