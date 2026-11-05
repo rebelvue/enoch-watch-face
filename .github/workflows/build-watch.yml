@@ -1,5 +1,5 @@
 name: Build watch app
-on: { push: { branches: [feature/early-aod] }, workflow_dispatch: {} }
+on: { push: { branches: [feature/smooth-north-hour] }, workflow_dispatch: {} }
 jobs:
   build:
     runs-on: macos-latest
