@@ -14,7 +14,7 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     /// compass heading, degrees clockwise from true north (magnetic when there is no fix yet); nil until the first reading
     @Published var heading: Double? = nil
     /// heading accuracy in degrees; negative = invalid, the compass needs calibration
-    @Published var headingAcc: Double = -1
+    @Published var headingAcc: Double = 0   // 0 until the first reading, so no CAL before the compass reports
     private var placeAt: CLLocation? = nil
     private let m = CLLocationManager()
     private var wanted = false
@@ -180,6 +180,10 @@ struct FaceView: View {
     @State private var nrot = CompassTarget()
     // red night mode: on while the sun is more than 4 degrees below the horizon where you are
     @State private var red = false
+    // calibration hint: only when the compass is really off. Heading invalid, or worse than 45 deg, for 5 s straight;
+    // hidden again once it is better than 30 deg for 2 s. Ordinary 10-30 deg wobble never shows it.
+    @State private var calShow = false
+    @State private var calSince: Date? = nil
 
     private func setCadence(_ c: TimelineViewDefaultContext.Cadence) {
         let low = c != .live; if low != lowCadence { lowCadence = low; logAOD(c) } }
@@ -221,6 +225,9 @@ struct FaceView: View {
                 let alt = sunAlt(now), r = red ? alt < -3 : alt < -4   // 1 degree of hysteresis
                 if r != red { red = r }
                 if aod { if northOn { northOn = false; northOffAt = .distantPast }; continue }
+                let ca = loc.headingAcc, flip = calShow ? (ca >= 0 && ca < 30) : (ca < 0 || ca > 45)
+                if flip { if calSince == nil { calSince = now } else if now.timeIntervalSince(calSince!) >= (calShow ? 2 : 5) { calShow.toggle(); calSince = nil } }
+                else { calSince = nil }
                 if let h = loc.heading {
                     let dv = min(Self.m360(h), 360 - Self.m360(h)), on = northOn ? dv < 7 : dv < 4
                     if on != northOn { if on { northAt = now } else { northFrom = northLevel(now).0; northOffAt = now }; northOn = on }
@@ -268,27 +275,17 @@ struct FaceView: View {
         return asin(sin(la) * sin(dec) + cos(la) * cos(dec) * cos(ha)) / d
     }
 
-    /// Compass marks (active look, fixed to the screen): an orange N on the rim where true north really is, the heading
-    /// in degrees above the coordinates, and a pulsing CAL tag when the watch says the compass needs calibrating.
+    /// Compass readout (active look, fixed to the screen): the heading in degrees above the coordinates, and a pulsing CAL tag
+    /// only when the compass is really off (see calShow).
     private func compassMarks(_ g: inout GraphicsContext, _ size: CGSize, _ now: Date) {
-        let c = CGPoint(x: size.width / 2, y: size.height / 2), R = min(Self.scr.width, Self.scr.height) / 2 - 4, o = FaceView.orange
-        let acc = loc.headingAcc, bad = acc < 0 || acc > 25
+        let c = CGPoint(x: size.width / 2, y: size.height / 2), o = FaceView.orange
         let mono = { (s: CGFloat) in Font.system(size: s, weight: .heavy, design: .monospaced) }
         if let h = loc.heading {
-            let b = ns.step(to: nrot.unwrap(-h), at: now) * .pi / 180, ux = sin(b), uy = -cos(b)
-            g.opacity = bad ? 0.4 : 1
-            // small triangle on the rim pointing out, the letter just inside it
-            let tip = CGPoint(x: c.x + R * ux, y: c.y + R * uy), base = CGPoint(x: c.x + (R - 7) * ux, y: c.y + (R - 7) * uy)
-            var tri = Path(); tri.move(to: tip)
-            tri.addLine(to: CGPoint(x: base.x - 3.5 * uy, y: base.y + 3.5 * ux)); tri.addLine(to: CGPoint(x: base.x + 3.5 * uy, y: base.y - 3.5 * ux)); tri.closeSubpath()
-            g.fill(tri, with: .color(o))
-            g.draw(g.resolve(Text("N").font(mono(9)).foregroundColor(o)), at: CGPoint(x: c.x + (R - 14) * ux, y: c.y + (R - 14) * uy), anchor: .center)
-            g.opacity = 1
             let hd = Int(Self.m360(h).rounded()) % 360, card = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Int((Double(hd) + 22.5) / 45) % 8]
             g.draw(g.resolve(Text("\(card) ").font(mono(9)).foregroundColor(o) + Text("\(hd)\u{00B0}").font(mono(9)).foregroundColor(.white)),
                    at: CGPoint(x: c.x, y: size.height - 24), anchor: .center)
         }
-        if bad {
+        if calShow {
             let p = 0.55 + 0.45 * sin(now.timeIntervalSince1970 * 4)
             g.draw(g.resolve(Text("CAL \u{221E}").font(mono(8)).foregroundColor(o.opacity(p))), at: CGPoint(x: c.x, y: size.height - 34), anchor: .center)
         }
