@@ -661,6 +661,10 @@ struct FaceView: View {
                 l.draw(Image(decorative: sh.0, scale: 1).interpolation(.high), in: disc)
                 l.blendMode = .screen; l.draw(Image(decorative: sh.1, scale: 1).interpolation(.high), in: disc); l.blendMode = .normal
             }
+            // moonlight (added 2026-11-05): night ground where the moon is up, brighter the fuller it is
+            if !ao, let ml = Self.moonlight(n: 48, moonLat: sky.moonLat * d, moonLon: sky.moonLon * d, sunLat: sky.sunLat * d, sunLon: sky.sunLon * d, lit: (1 - cos(sky.phase)) / 2) {
+                l.blendMode = .screen; l.draw(Image(decorative: ml, scale: 1).interpolation(.high), in: disc); l.blendMode = .normal
+            }
             if !ao {
             // firmament dome from above: clear crown, pale blue sheen at the rim resting on the ice wall
             l.fill(Path(ellipseIn: disc), with: .radialGradient(Gradient(stops: [
@@ -778,6 +782,7 @@ struct FaceView: View {
             let f = Font.system(size: 7, weight: .bold, design: .monospaced)
             g.draw(g.resolve(Text(scrubH > 0 ? "+" : "-").font(f).foregroundColor(amb) + Text(body).font(f).foregroundColor(.white)), at: CGPoint(x: c.x, y: 30), anchor: .center)
         }
+        if !ao { rainRing(&g, size, date) }
         corners(&g, size, date, sky)
         if !ao { for y in stride(from: 0.0, to: size.height, by: 3) { g.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.03))) } }
 
@@ -814,6 +819,48 @@ struct FaceView: View {
         }
         guard let a = img(night), let b = img(day) else { return nil }
         return (a, b)
+    }
+
+    /// Moonlight cache: rebuilt when the moon moves about 0.5 deg or the phase changes about 2%.
+    private static var moonCache: (key: String, img: CGImage)?
+    private static func moonlight(n: Int, moonLat ml: Double, moonLon mo: Double, sunLat sl: Double, sunLon so: Double, lit: Double) -> CGImage? {
+        guard ml.isFinite, mo.isFinite, sl.isFinite, so.isFinite, lit > 0.03 else { return nil }
+        let key = "\(Int((ml * 114.6).rounded())):\(Int((mo * 114.6).rounded())):\(Int((sl * 114.6).rounded())):\(Int((so * 114.6).rounded())):\(Int(lit * 50))"
+        if let c = moonCache, c.key == key { return c.img }
+        let d = Double.pi / 180
+        var px = [UInt8](repeating: 0, count: n * n * 4)
+        for j in 0..<n { for i in 0..<n {
+            let dx = (Double(i) + 0.5) / Double(n) * 2 - 1, dy = (Double(j) + 0.5) / Double(n) * 2 - 1, r = hypot(dx, dy)
+            let la = (90 - min(r, 1) * 180) * d, lo = atan2(dx, dy)
+            let em = sin(la) * sin(ml) + cos(la) * cos(ml) * cos(lo - mo)     // moon elevation (sin)
+            let es = sin(la) * sin(sl) + cos(la) * cos(sl) * cos(lo - so)     // sun elevation (sin)
+            var up = min(1, max(0, (em + 0.05) / 0.35)); up = up * up * (3 - 2 * up)
+            var dark = min(1, max(0, (-es - 0.05) / 0.25)); dark = dark * dark * (3 - 2 * dark)
+            let a = 255 * 0.30 * lit * up * dark, k = (j * n + i) * 4
+            // cool silver (150, 170, 215), premultiplied, screen-blended
+            px[k] = UInt8(a * 150 / 255); px[k + 1] = UInt8(a * 170 / 255); px[k + 2] = UInt8(a * 215 / 255); px[k + 3] = UInt8(a)
+        } }
+        guard let p = CGDataProvider(data: Data(px) as CFData),
+              let im = CGImage(width: n, height: n, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: n * 4, space: CGColorSpaceCreateDeviceRGB(),
+                               bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue), provider: p, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else { return nil }
+        moonCache = (key, im); return im
+    }
+
+    /// Rain ring (added 2026-11-05): next 6 hours of rain chance as arcs just inside the dial edge, placed on the 12-hour clock
+    /// from now onwards (each hour = 30 deg). Faint track under each hour, blue arc whose strength follows the chance.
+    /// Hidden when there is no data or it is over 3 h old. Not drawn in always-on.
+    private func rainRing(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date) {
+        guard !rain6.isEmpty, let ok = wxOk, date.timeIntervalSince(ok) < 3 * 3600 else { return }
+        let c = CGPoint(x: size.width / 2, y: size.height / 2), r = min(Self.scr.width, Self.scr.height) / 2 - 4 - 9
+        let cal = Calendar.current, h = Double(cal.component(.hour, from: date) % 12) + Double(cal.component(.minute, from: date)) / 60
+        let blue = Color(red: 0.35, green: 0.68, blue: 1)
+        for (k, pr) in rain6.prefix(6).enumerated() {
+            let a0 = (h + Double(k)) * 30 + 1.5, a1 = (h + Double(k + 1)) * 30 - 1.5   // degrees clockwise from 12
+            var p = Path(); p.addArc(center: c, radius: r, startAngle: .degrees(a0 - 90), endAngle: .degrees(a1 - 90), clockwise: false)
+            g.stroke(p, with: .color(.white.opacity(0.10)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+            let v = Double(max(0, min(100, pr))) / 100
+            if v >= 0.05 { g.stroke(p, with: .color(blue.opacity(0.25 + 0.75 * v)), style: StrokeStyle(lineWidth: 1.5 + 2 * v, lineCap: .round)) }
+        }
     }
 
     // ---- four corner complications ----
