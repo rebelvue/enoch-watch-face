@@ -1246,7 +1246,7 @@ struct IntroView: View {
     private let pages: [(String, String, String)] = [
         ("", "Your world", "The map is the face. The dot is you, the glow is the sun right now."),
         ("digitalcrown.arrow.clockwise.fill", "Travel in time", "Turn the crown to move the sun and the night. Let go and it springs back to now."),
-        ("hand.tap.fill", "Tap and zoom", "Tap a corner for details, or the sun and moon for eclipses. Double tap, or pinch your fingers, to zoom."),
+        ("hand.tap.fill", "Tap and zoom", "Tap a corner for details, or the sun and moon for eclipses. Double tap to zoom."),
         ("location.north.line.fill", "Find north", "Face north and the frame lights up orange. Face the sun and a warm line locks on. Shake your wrist to resync the compass."),
         ("gearshape.fill", "Make it yours", "Touch and hold the face for settings. Tip: turn off Wrist Flick in Settings > Gestures so shaking stays in Enoch.")]
     var body: some View {
