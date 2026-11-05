@@ -236,7 +236,7 @@ struct FaceView: View {
         let c = CGPoint(x: size.width / 2, y: size.height / 2), R = (min(Self.scr.width, Self.scr.height) / 2 - 4) * zs.x
         let sec = now.timeIntervalSince1970.truncatingRemainder(dividingBy: 60)
         let a = (sec * 6 - 90) * Double.pi / 180            // screen angle, 0 = 3 o'clock, clockwise
-        let acc = Color(red: 0.75, green: 0.96, blue: 0.82), trail = 50.0 / 360
+        let acc = FaceView.orange, trail = 50.0 / 360
         let disc = Path(ellipseIn: CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R))
         g.drawLayer { l in
             l.clip(to: disc)
