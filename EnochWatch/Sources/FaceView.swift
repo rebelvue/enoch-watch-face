@@ -183,6 +183,10 @@ struct FaceView: View {
     @State private var northAt = Date.distantPast
     @State private var northOffAt = Date.distantPast
     @State private var northFrom = 0.0
+    // dead on north: the frame thickens and fades in (0.35 s), then thins and fades out (0.45 s) when you drift off
+    @State private var deadOn = false
+    @State private var deadAt = Date.distantPast
+    @State private var deadFrom = 0.0
     // compass marks: smoothed screen angle of real north on the rim
     @State private var ns = ZoomSpring(response: 0.45, damping: 1)
     @State private var nrot = CompassTarget()
@@ -245,7 +249,7 @@ struct FaceView: View {
                 if fadeAt != .distantPast && now.timeIntervalSince(fadeAt) > 0.55 { fadeAt = .distantPast }
                 let alt = sunAlt(now), r = red ? alt < -3 : alt < -4   // 1 degree of hysteresis
                 if r != red { red = r }
-                if aod { if northOn { northOn = false; northOffAt = .distantPast }; continue }
+                if aod { if northOn { northOn = false; northOffAt = .distantPast }; if deadOn { deadOn = false; deadFrom = 0; deadAt = .distantPast }; continue }
                 let ca = loc.headingAcc, flip = calShow ? (ca >= 0 && ca < 30) : (ca < 0 || ca > 45)
                 if flip { if calSince == nil { calSince = now } else if now.timeIntervalSince(calSince!) >= (calShow ? 2 : 5) { calShow.toggle(); calSince = nil } }
                 else { calSince = nil }
@@ -254,7 +258,9 @@ struct FaceView: View {
                 if let h = loc.heading {
                     let dv = min(Self.m360(h), 360 - Self.m360(h)), on = northOn ? dv < 7 : dv < 4
                     if on != northOn { if on { northAt = now } else { northFrom = northLevel(now).0; northOffAt = now }; northOn = on }
-                }
+                    let d = deadOn ? dv < 3 : dv < 1.5
+                    if d != deadOn { deadFrom = deadLevel(now); deadAt = now; deadOn = d }
+                } else if deadOn { deadFrom = deadLevel(now); deadAt = now; deadOn = false }
                 if scrub != 0 && now.timeIntervalSince(crownAt) > 2 { scrub = 0 }
                 if detail != nil && now.timeIntervalSince(detailAt) > 6 { detail = nil }
                 let f = zs.moving || sc.moving || rs.moving || now.timeIntervalSince(crownAt) < 0.3
@@ -386,19 +392,25 @@ struct FaceView: View {
         return (min(1, base), f)
     }
 
+    /// Dead-on-north thickness 0...1, animated in time: thicken + fade in over 0.35 s on lock (under 1.5 deg),
+    /// thin + fade out over 0.45 s on release (over 3 deg), each starting from wherever the last one stopped.
+    private func deadLevel(_ now: Date) -> Double {
+        let t = now.timeIntervalSince(deadAt), x = max(0, min(1, t / (deadOn ? 0.35 : 0.45))), e = x * x * (3 - 2 * x)
+        return deadOn ? deadFrom + (1 - deadFrom) * e : deadFrom * (1 - e)
+    }
+
     /// Orange frame around the screen while facing north (the centre of the map): flash in, fade out.
     private func northFrame(_ g: inout GraphicsContext, _ size: CGSize, _ now: Date) {
         let (al, f) = northLevel(now); if al <= 0.001 { return }
-        // dead on north (within 1.5 deg, easing in from 4 deg): the frame grows clearly thicker
-        let dv = loc.heading.map { min(Self.m360($0), 360 - Self.m360($0)) } ?? 180
-        let y = max(0, min(1, (4 - dv) / 2.5)), lk = y * y * (3 - 2 * y)
+        let lk = deadLevel(now)
         let o = FaceView.orange, cr = min(size.width, size.height) * 0.21
         let r = Path(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5), cornerRadius: cr, style: .continuous)
         g.drawLayer { l in
             l.addFilter(.blur(radius: 5 + 5 * f))
             l.stroke(r, with: .color(o.opacity((0.45 + 0.45 * f + 0.15 * lk) * al)), lineWidth: 8 + 10 * f + 6 * lk)
         }
-        g.stroke(r, with: .color(o.opacity(al)), lineWidth: 2.5 + 1.5 * f + 3.5 * lk)
+        g.stroke(r, with: .color(o.opacity(al)), lineWidth: 2.5 + 1.5 * f)
+        if lk > 0.001 { g.stroke(r, with: .color(o.opacity(al * lk)), lineWidth: 2.5 + 1.5 * f + 4.5 * lk) }
         if f > 0 { g.stroke(r, with: .color(.white.opacity(0.5 * f * al)), lineWidth: 1) }
     }
 
