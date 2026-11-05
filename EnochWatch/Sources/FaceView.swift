@@ -36,7 +36,10 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     /// wrist up / app active: restart so a stale or suspended session gets a fresh satellite fix
     func wake() { wanted = true
         if CLLocationManager.headingAvailable() { m.startUpdatingHeading() } // compass runs only with the wrist up
-        guard authorized, !noPrompt, Date().timeIntervalSince(fixAt) > Locator.fixLife else { return }
+        guard authorized, !noPrompt else { return }
+        // true north needs location updates running (Apple: CLHeading.trueHeading). Fresh fix: keep them on at coarse,
+        // cheap accuracy (no GPS); stale fix: full GPS until a satellite fix arrives.
+        m.desiredAccuracy = Date().timeIntervalSince(fixAt) > Locator.fixLife ? kCLLocationAccuracyBest : kCLLocationAccuracyThreeKilometers
         m.stopUpdatingLocation(); m.startUpdatingLocation() }
     /// always-on / inactive: GPS off
     func sleep() { wanted = false; m.stopUpdatingLocation(); m.stopUpdatingHeading() }
@@ -46,12 +49,16 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     func locationManager(_ m: CLLocationManager, didUpdateHeading h: CLHeading) {
         if abs(h.headingAccuracy - headingAcc) >= 1 || (h.headingAccuracy < 0) != (headingAcc < 0) { headingAcc = h.headingAccuracy }
         guard h.headingAccuracy >= 0 else { return } // negative = invalid (needs calibration)
-        heading = h.trueHeading >= 0 ? h.trueHeading : h.magneticHeading }
+        // magnetic declination remembered from the last true reading, so a moment without true heading never shifts the sun/north
+        if h.trueHeading >= 0 { decl = h.trueHeading - h.magneticHeading; heading = h.trueHeading }
+        else { heading = h.magneticHeading + (decl ?? 0) } }
+    private var decl: Double? = nil
     func locationManagerDidChangeAuthorization(_ m: CLLocationManager) { if wanted { wake() } }
     func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) {
         guard let L = l.last(where: { $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= Locator.maxError && -$0.timestamp.timeIntervalSinceNow < Locator.maxAge }) else { return }
         coord = L.coordinate; live = true
-        fixAt = Date(); m.stopUpdatingLocation() // got a good fix: GPS off until the next wrist raise after 10 min
+        // got a good fix: GPS receiver off, location updates stay on at coarse accuracy so true heading keeps working
+        fixAt = Date(); if m.desiredAccuracy != kCLLocationAccuracyThreeKilometers { m.desiredAccuracy = kCLLocationAccuracyThreeKilometers }
         // country borders: point-in-polygon on every fix (bundled Natural Earth 1:110m, public domain)
         Borders.shared.locate(L.coordinate)
         // offline city name, recomputed after moving more than 2 km
