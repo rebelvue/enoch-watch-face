@@ -219,6 +219,8 @@ struct FaceView: View {
         ._statusBarHidden(true)
     }
 
+    static let scr = WKInterfaceDevice.current().screenBounds.size
+
     private static func px(_ t: CGPoint, _ k: Double) -> CGSize { CGSize(width: t.x * k, height: -t.y * k) }
 
     /// One frame. Map, grid, day/night shading, stars, sun and moon stay fixed; only digits, outlines and text float with wrist tilt
@@ -233,11 +235,11 @@ struct FaceView: View {
         ZStack {
             // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon, comps and text
             // always-on: everything greyscale and flat, except the sun and moon (layer 5, full colour)
-            Canvas { g, size in draw(&g, size, date, 0) }.rotationEffect(.degrees(spin)).aodGrey(aod)
+            Canvas { g, size in draw(&g, size, date, 0) }.spun(spin).aodGrey(aod)
             GlassTime(date: date, tilt: tilt, aod: aod).offset(Self.px(tilt, 11)).aodGrey(aod).zIndex(1)
-            Canvas { g, size in draw(&g, size, date, 3) }.rotationEffect(.degrees(spin)).offset(Self.px(tilt, 6)).aodGrey(aod).zIndex(2).allowsHitTesting(false)
-            Canvas { g, size in draw(&g, size, date, 1) }.rotationEffect(.degrees(spin)).aodGrey(aod).zIndex(3).allowsHitTesting(false)
-            if aod { Canvas { g, size in draw(&g, size, date, 5) }.rotationEffect(.degrees(spin)).zIndex(3.5).allowsHitTesting(false) }
+            Canvas { g, size in draw(&g, size, date, 3) }.spun(spin).offset(Self.px(tilt, 6)).aodGrey(aod).zIndex(2).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 1) }.spun(spin).aodGrey(aod).zIndex(3).allowsHitTesting(false)
+            if aod { Canvas { g, size in draw(&g, size, date, 5) }.spun(spin).zIndex(3.5).allowsHitTesting(false) }
             Canvas { g, size in draw(&g, size, date, 2, off) }.offset(Self.px(tilt, 3)).aodGrey(aod).zIndex(4).allowsHitTesting(false)
             if let k = detail { card(k, date).zIndex(5) }
         }
@@ -345,7 +347,7 @@ struct FaceView: View {
 
     private func draw(_ g: inout GraphicsContext, _ size: CGSize, _ date: Date, _ layer: Int, _ scrubH: Double = 0) {
         let sky = Sky(date: date), d = Double.pi / 180
-        let c = CGPoint(x: size.width / 2, y: size.height / 2), R = (min(size.width, size.height) / 2 - 4) * zs.x
+        let c = CGPoint(x: size.width / 2, y: size.height / 2), R = (min(Self.scr.width, Self.scr.height) / 2 - 4) * zs.x // radius from the screen, not the canvas (rotating canvases are larger)
         // World of Enoch projection: r = (90 - lat)/180 * R, lon 0 pointing down, east to the right
         func P(_ lat: Double, _ lon: Double) -> CGPoint {
             let r = (90 - lat) / 180 * R; return CGPoint(x: c.x + r * sin(lon * d), y: c.y + r * cos(lon * d)) }
@@ -670,6 +672,16 @@ final class Motion {
 }
 
 /// Critically-tuned spring (response 0.35 s, damping 0.65: a small visible overshoot), integrated per frame.
+extension View {
+    /// Compass layers draw on a square as wide as the screen diagonal, so the zoomed-in disc still covers every corner
+    /// after rotation (a screen-sized canvas clipped the disc to a rectangle, which showed as cut corners when turned).
+    /// The outer frame keeps the layout screen-sized; nothing clips, so the overflow is simply off-screen.
+    func spun(_ deg: Double) -> some View {
+        let s = FaceView.scr, d = ceil(hypot(s.width, s.height)) + 4
+        return self.frame(width: d, height: d).rotationEffect(.degrees(deg)).frame(width: s.width, height: s.height)
+    }
+}
+
 /// Keeps the compass target continuous (no spin the long way round when the angle wraps 359 -> 0).
 final class CompassTarget {
     private(set) var last: Double = 0
