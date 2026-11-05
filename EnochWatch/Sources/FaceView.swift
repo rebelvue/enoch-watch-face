@@ -190,6 +190,12 @@ struct FaceView: View {
     @State private var rot = CompassTarget()
     @State private var scrub: Double = 0                    // target scrub offset, hours; 0 = live
     @State private var fast = false
+    // battery: when nothing on screen can move (wrist still, heading steady, no animation running) drop to 8 fps;
+    // any movement brings 24 fps back within 0.1 s and keeps it for 1.5 s after things settle
+    @State private var idle = false
+    @State private var liveUntil = Date.distantPast
+    @State private var lastH: Double? = nil
+    @State private var lastTilt = CGPoint.zero
     @State private var crownAt = Date.distantPast
     @State private var detail: Comp? = nil
     @State private var detailAt = Date.distantPast
@@ -229,7 +235,7 @@ struct FaceView: View {
     var body: some View {
         Group {
             if aod && fadeAt == .distantPast { TimelineView(.everyMinute) { ctx in face(ctx.date, true).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
-            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : 1.0 / 24)) { ctx in blend(ctx.date).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
+            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : idle ? 1.0 / 8 : 1.0 / 24)) { ctx in blend(ctx.date).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -290,6 +296,13 @@ struct FaceView: View {
                 if detail != nil && now.timeIntervalSince(detailAt) > 6 { detail = nil }
                 let f = zs.moving || sc.moving || rs.moving || now.timeIntervalSince(crownAt) < 0.3
                 if f != fast { fast = f }
+                let h = loc.heading, tl = motion.tiltRaw
+                var dh = 0.0; if let h, let p = lastH { dh = abs(h - p); if dh > 180 { dh = 360 - dh } }
+                let moved = (h != nil) != (lastH != nil) || dh > 0.4 || hypot(tl.x - lastTilt.x, tl.y - lastTilt.y) > 0.02
+                lastH = h; lastTilt = tl
+                let recent = [northAt, northOffAt, sunAt, syncAt, calOkAt, crownAt, detailAt].contains { now.timeIntervalSince($0) < 1.5 }
+                if moved || f || recent || fadeAt != .distantPast || ns.moving || scrub != 0 || detail != nil || showSettings || !onboarded || now < hintUntil.addingTimeInterval(1) { liveUntil = now.addingTimeInterval(1.5) }
+                let i = now > liveUntil; if i != idle { idle = i }
             }
         }
         .redNight(redMode == 1 || (redMode == 0 && red))
@@ -988,6 +1001,8 @@ final class Motion {
     private(set) var source = "none"
     /// gravity along the screen normal, smoothed: about -1 face up toward you, 0 on edge (arm hanging), +1 face down
     private(set) var gz: Double = -1
+    /// unsmoothed tilt, for the idle check only
+    var tiltRaw: CGPoint { raw }
     func start() {
         #if targetEnvironment(simulator)
         source = "simulator"; return
