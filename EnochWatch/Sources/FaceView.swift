@@ -18,6 +18,9 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     private var placeAt: CLLocation? = nil
     private let m = CLLocationManager()
     private var wanted = false
+    /// battery: a satellite fix is kept 10 min; GPS turns off as soon as one arrives and only restarts on a wrist raise after that
+    private var fixAt = Date.distantPast
+    private static let fixLife: TimeInterval = 600
     private let noPrompt = ProcessInfo.processInfo.arguments.contains("-noLocPrompt")
     /// a fix this precise and this fresh can only come from satellites, not cell or wifi positioning
     private static let maxError: CLLocationAccuracy = 100, maxAge: TimeInterval = 120
@@ -33,7 +36,8 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     /// wrist up / app active: restart so a stale or suspended session gets a fresh satellite fix
     func wake() { wanted = true
         if CLLocationManager.headingAvailable() { m.startUpdatingHeading() } // compass runs only with the wrist up
-        guard authorized, !noPrompt else { return }; m.stopUpdatingLocation(); m.startUpdatingLocation() }
+        guard authorized, !noPrompt, Date().timeIntervalSince(fixAt) > Locator.fixLife else { return }
+        m.stopUpdatingLocation(); m.startUpdatingLocation() }
     /// always-on / inactive: GPS off
     func sleep() { wanted = false; m.stopUpdatingLocation(); m.stopUpdatingHeading() }
     /// wrist shake: restart the compass so it re-reads the magnetometer right away (the system does the calibration itself;
@@ -47,6 +51,7 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) {
         guard let L = l.last(where: { $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= Locator.maxError && -$0.timestamp.timeIntervalSinceNow < Locator.maxAge }) else { return }
         coord = L.coordinate; live = true
+        fixAt = Date(); m.stopUpdatingLocation() // got a good fix: GPS off until the next wrist raise after 10 min
         // country borders: point-in-polygon on every fix (bundled Natural Earth 1:110m, public domain)
         Borders.shared.locate(L.coordinate)
         // offline city name, recomputed after moving more than 2 km
@@ -201,7 +206,7 @@ struct FaceView: View {
     var body: some View {
         Group {
             if aod && fadeAt == .distantPast { TimelineView(.everyMinute) { ctx in face(ctx.date, true).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
-            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : 1.0 / 30)) { ctx in blend(ctx.date).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
+            else { TimelineView(.animation(minimumInterval: fast ? 1.0 / 60 : 1.0 / 24)) { ctx in blend(ctx.date).onChange(of: ctx.cadence, initial: true) { _, c in setCadence(c) } } }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -746,6 +751,7 @@ struct FaceView: View {
     @State private var rain6: [Int] = []
     @State private var wxAt = Date.distantPast
     @State private var wxOk: Date? = nil
+    @State private var wxCoord: CLLocationCoordinate2D? = nil
     private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
 
     private static let mint = Color(red: 0.75, green: 0.96, blue: 0.82), amber = FaceView.orange, alert = Color(red: 1, green: 0.29, blue: 0.24)
@@ -828,7 +834,10 @@ struct FaceView: View {
     }
 
     private func fetchTemp(_ c: CLLocationCoordinate2D) {
-        wxAt = Date()
+        // battery/data: no refetch on every wrist raise; only when the last good one is 10+ min old or you moved 5+ km
+        let moved = wxCoord.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude)) > 5000 } ?? true
+        if !moved, let ok = wxOk, Date().timeIntervalSince(ok) < 600 { return }
+        wxAt = Date(); wxCoord = c
         let u = URL(string: String(format: "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f&current=temperature_2m&hourly=precipitation_probability&forecast_hours=6", c.latitude, c.longitude))!
         URLSession.shared.dataTask(with: u) { data, _, _ in
             struct R: Decodable { struct C: Decodable { let temperature_2m: Double }; struct H: Decodable { let precipitation_probability: [Int?] }; let current: C; let hourly: H? }
@@ -857,14 +866,14 @@ final class Motion {
             self.raw = CGPoint(x: self.raw.x + (x - self.raw.x) * k, y: self.raw.y + (y - self.raw.y) * k) }
         if mm.isDeviceMotionAvailable {
             guard !mm.isDeviceMotionActive else { return }
-            source = "deviceMotion"; mm.deviceMotionUpdateInterval = 1.0 / 60
+            source = "deviceMotion"; mm.deviceMotionUpdateInterval = 1.0 / 30 // battery: 30 Hz is plenty for tilt, wrist-away and shake
             mm.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in
                 guard let m else { return }
                 feed(m.gravity.x, m.gravity.y); self?.feedZ(m.gravity.z)
                 let u = m.userAcceleration; self?.feedShake(sqrt(u.x * u.x + u.y * u.y + u.z * u.z)) }
         } else if mm.isAccelerometerAvailable {
             guard !mm.isAccelerometerActive else { return }
-            source = "accelerometer"; mm.accelerometerUpdateInterval = 1.0 / 60
+            source = "accelerometer"; mm.accelerometerUpdateInterval = 1.0 / 30
             mm.startAccelerometerUpdates(to: .main) { [weak self] a, _ in if let a = a?.acceleration { feed(a.x, a.y); self?.feedZ(a.z) } }
         }
         print("EnochWatch motion source:", source)
