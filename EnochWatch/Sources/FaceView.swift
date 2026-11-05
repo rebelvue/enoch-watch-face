@@ -464,14 +464,17 @@ struct FaceView: View {
         // sun: warm corona bloom, anamorphic streak, white-hot limb-darkened photosphere
         let amb = FaceView.orange, sp = P(sky.sunLat, sky.sunLon)
         var sg = g; sg.blendMode = .plusLighter
-        sg.fill(Path(ellipseIn: CGRect(x: sp.x - 32, y: sp.y - 32, width: 64, height: 64)), with: .radialGradient(Gradient(stops: [
+        // sun the same size as the moon (radius 6; flat-earth sun and moon look equal), glow and streak scaled to match
+        sg.fill(Path(ellipseIn: CGRect(x: sp.x - 40, y: sp.y - 40, width: 80, height: 80)), with: .radialGradient(Gradient(stops: [
             .init(color: Color(red: 1, green: 0.84, blue: 0.55).opacity(0.55), location: 0), .init(color: Color(red: 1, green: 0.66, blue: 0.27).opacity(0.18), location: 0.3),
-            .init(color: .clear, location: 1)]), center: sp, startRadius: 0, endRadius: 32))
-        sg.fill(Path(CGRect(x: sp.x - 34, y: sp.y - 0.6, width: 68, height: 1.2)), with: .linearGradient(Gradient(colors: [.clear, Color(red: 0.86, green: 0.92, blue: 1).opacity(0.55), .clear]),
-            startPoint: CGPoint(x: sp.x - 34, y: sp.y), endPoint: CGPoint(x: sp.x + 34, y: sp.y)))
-        g.fill(Path(ellipseIn: CGRect(x: sp.x - 4.5, y: sp.y - 4.5, width: 9, height: 9)), with: .radialGradient(Gradient(stops: [
+            .init(color: .clear, location: 1)]), center: sp, startRadius: 0, endRadius: 40))
+        // anamorphic streak is a lens effect: counter-rotate it so it stays level on screen while the disc turns with the compass
+        var fl = sg; fl.translateBy(x: sp.x, y: sp.y); fl.rotate(by: .degrees(-rs.x))
+        fl.fill(Path(CGRect(x: -44, y: -0.7, width: 88, height: 1.4)), with: .linearGradient(Gradient(colors: [.clear, Color(red: 0.86, green: 0.92, blue: 1).opacity(0.55), .clear]),
+            startPoint: CGPoint(x: -44, y: 0), endPoint: CGPoint(x: 44, y: 0)))
+        g.fill(Path(ellipseIn: CGRect(x: sp.x - 6, y: sp.y - 6, width: 12, height: 12)), with: .radialGradient(Gradient(stops: [
             .init(color: .white, location: 0), .init(color: Color(red: 1, green: 0.96, blue: 0.86), location: 0.55), .init(color: Color(red: 1, green: 0.82, blue: 0.48), location: 0.85),
-            .init(color: Color(red: 0.95, green: 0.6, blue: 0.23), location: 1)]), center: sp, startRadius: 0, endRadius: 4.5))
+            .init(color: Color(red: 0.95, green: 0.6, blue: 0.23), location: 1)]), center: sp, startRadius: 0, endRadius: 6))
         // no SUN/MOON tags (Levi, 2026-11-03)
 
         // moon: NASA LRO nearside texture, sphere-shaded terminator, earthshine and limb darkening
