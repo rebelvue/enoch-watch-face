@@ -11,6 +11,8 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var coord = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548) // fallback: Santandrei, Bihor, Romania (home)
     @Published var live = false
     @Published var place: String? = nil
+    /// compass heading, degrees clockwise from true north (magnetic when there is no fix yet); nil until the first reading
+    @Published var heading: Double? = nil
     private var placeAt: CLLocation? = nil
     private let m = CLLocationManager()
     private var wanted = false
@@ -21,14 +23,20 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
         m.desiredAccuracy = kCLLocationAccuracyBest // turns the GPS receiver on
         m.distanceFilter = 50
         m.activityType = .other
+        m.headingFilter = 1
         if !noPrompt { m.requestWhenInUseAuthorization() }
         // deferred: @StateObject builds this during a view update, so publishing here directly would warn
         let c = coord; DispatchQueue.main.async { Borders.shared.locate(c) } }
     private var authorized: Bool { let s = m.authorizationStatus; return s == .authorizedWhenInUse || s == .authorizedAlways }
     /// wrist up / app active: restart so a stale or suspended session gets a fresh satellite fix
-    func wake() { wanted = true; guard authorized, !noPrompt else { return }; m.stopUpdatingLocation(); m.startUpdatingLocation() }
+    func wake() { wanted = true
+        if CLLocationManager.headingAvailable() { m.startUpdatingHeading() } // compass runs only with the wrist up
+        guard authorized, !noPrompt else { return }; m.stopUpdatingLocation(); m.startUpdatingLocation() }
     /// always-on / inactive: GPS off
-    func sleep() { wanted = false; m.stopUpdatingLocation() }
+    func sleep() { wanted = false; m.stopUpdatingLocation(); m.stopUpdatingHeading() }
+    func locationManager(_ m: CLLocationManager, didUpdateHeading h: CLHeading) {
+        guard h.headingAccuracy >= 0 else { return } // negative = invalid (needs calibration)
+        heading = h.trueHeading >= 0 ? h.trueHeading : h.magneticHeading }
     func locationManagerDidChangeAuthorization(_ m: CLLocationManager) { if wanted { wake() } }
     func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) {
         guard let L = l.last(where: { $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= Locator.maxError && -$0.timestamp.timeIntervalSinceNow < Locator.maxAge }) else { return }
@@ -143,6 +151,8 @@ struct FaceView: View {
     @State private var zt: Double = 1                       // zoom target
     @State private var zs = ZoomSpring()
     @State private var sc = ZoomSpring(response: 0.7, damping: 0.9)  // shown scrub offset (hours), follows `scrub`
+    @State private var rs = ZoomSpring(response: 0.45, damping: 1)   // shown compass rotation (deg, unwrapped)
+    @State private var rot = CompassTarget()
     @State private var scrub: Double = 0                    // target scrub offset, hours; 0 = live
     @State private var fast = false
     @State private var crownAt = Date.distantPast
@@ -191,7 +201,7 @@ struct FaceView: View {
                 let now = Date()
                 if scrub != 0 && now.timeIntervalSince(crownAt) > 2 { scrub = 0 }
                 if detail != nil && now.timeIntervalSince(detailAt) > 6 { detail = nil }
-                let f = zs.moving || sc.moving || now.timeIntervalSince(crownAt) < 0.3
+                let f = zs.moving || sc.moving || rs.moving || now.timeIntervalSince(crownAt) < 0.3
                 if f != fast { fast = f }
             }
         }
@@ -205,7 +215,6 @@ struct FaceView: View {
         .onChange(of: loc.live) { _ in fetchTemp(loc.coord) }
         .onDisappear { motion.stop(); loc.sleep() }
         .toolbar(.hidden, for: .navigationBar)
-        .persistentSystemOverlays(.hidden)
         // hides the watchOS status-bar time (SwiftUI underscored modifier, present in the public SDK interface)
         ._statusBarHidden(true)
     }
@@ -219,19 +228,47 @@ struct FaceView: View {
         let _ = zs.step(to: zt, at: now)
         let off = aod ? 0 : sc.step(to: scrub, at: now)
         let date = now.addingTimeInterval(off * 3600)
+        // compass: the whole disc (map, shading, outlines, sky) turns so the way you face points up; digits and text stay put
+        let spin = aod ? rs.x : rs.step(to: rot.unwrap(compassAngle(now) ?? rot.last), at: now)
         ZStack {
             // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon, comps and text
             // always-on: everything greyscale and flat, except the sun and moon (layer 5, full colour)
-            Canvas { g, size in draw(&g, size, date, 0) }.aodGrey(aod)
+            Canvas { g, size in draw(&g, size, date, 0) }.rotationEffect(.degrees(spin)).aodGrey(aod)
             GlassTime(date: date, tilt: tilt, aod: aod).offset(Self.px(tilt, 11)).aodGrey(aod).zIndex(1)
-            Canvas { g, size in draw(&g, size, date, 3) }.offset(Self.px(tilt, 6)).aodGrey(aod).zIndex(2).allowsHitTesting(false)
-            Canvas { g, size in draw(&g, size, date, 1) }.aodGrey(aod).zIndex(3).allowsHitTesting(false)
-            if aod { Canvas { g, size in draw(&g, size, date, 5) }.zIndex(3.5).allowsHitTesting(false) }
+            Canvas { g, size in draw(&g, size, date, 3) }.rotationEffect(.degrees(spin)).offset(Self.px(tilt, 6)).aodGrey(aod).zIndex(2).allowsHitTesting(false)
+            Canvas { g, size in draw(&g, size, date, 1) }.rotationEffect(.degrees(spin)).aodGrey(aod).zIndex(3).allowsHitTesting(false)
+            if aod { Canvas { g, size in draw(&g, size, date, 5) }.rotationEffect(.degrees(spin)).zIndex(3.5).allowsHitTesting(false) }
             Canvas { g, size in draw(&g, size, date, 2, off) }.offset(Self.px(tilt, 3)).aodGrey(aod).zIndex(4).allowsHitTesting(false)
             if let k = detail { card(k, date).zIndex(5) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+    }
+
+    /// Screen rotation (deg, clockwise) for the compass. On the Enoch map, "north" from you is the line to the centre, but the
+    /// map bends directions, so the line from you to the sun is not the sun's real compass bearing. Two anchors keep both true:
+    /// facing north puts the centre straight ahead, facing the real sun puts the sun's map point straight ahead;
+    /// headings in between are spread evenly between those two map directions. Uses the live sun, not the crown-scrubbed one.
+    private func compassAngle(_ now: Date) -> Double? {
+        guard let h = loc.heading else { return nil }
+        let d = Double.pi / 180, sky = Sky(date: now), la = loc.coord.latitude, lo = loc.coord.longitude
+        func pt(_ lat: Double, _ lon: Double) -> (Double, Double) { let r = (90 - lat) / 180; return (r * sin(lon * d), r * cos(lon * d)) }
+        func brg(_ x: Double, _ y: Double) -> Double { atan2(x, -y) / d }                // screen bearing, clockwise from up
+        func m360(_ x: Double) -> Double { let y = fmod(x, 360); return y < 0 ? y + 360 : y }
+        let u = pt(la, lo), s = pt(sky.sunLat, sky.sunLon)
+        let dl = (sky.sunLon - lo) * d, p1 = la * d, p2 = sky.sunLat * d
+        let sunAz = atan2(sin(dl) * cos(p2), cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl)) / d  // real bearing to the sun
+        let haveSun = hypot(s.0 - u.0, s.1 - u.1) > 1e-4, haveN = hypot(u.0, u.1) > 1e-4
+        let sB = brg(s.0 - u.0, s.1 - u.1), nB = brg(-u.0, -u.1)
+        var f: Double
+        if !haveSun { f = nB + h }
+        else {
+            let a = m360(sunAz), b = m360(sB - nB), hh = m360(h)
+            if !haveN || a < 1 || a > 359 || b < 1 || b > 359 { f = sB + (h - sunAz) }
+            else if hh <= a { f = nB + hh * b / a }
+            else { f = nB + b + (hh - a) * (360 - b) / (360 - a) }
+        }
+        return -f
     }
 
     private func tap(_ p: CGPoint) {
@@ -633,6 +670,17 @@ final class Motion {
 }
 
 /// Critically-tuned spring (response 0.35 s, damping 0.65: a small visible overshoot), integrated per frame.
+/// Keeps the compass target continuous (no spin the long way round when the angle wraps 359 -> 0).
+final class CompassTarget {
+    private(set) var last: Double = 0
+    private var started = false
+    func unwrap(_ a: Double) -> Double {
+        if !started { started = true; last = a; return a }
+        var dd = fmod(a - last + 180, 360); if dd < 0 { dd += 360 }
+        last += dd - 180; return last
+    }
+}
+
 final class ZoomSpring {
     private(set) var x: Double = 1
     private var v: Double = 0, t: Double = 1, last: Date? = nil
