@@ -411,6 +411,7 @@ struct FaceView: View {
             if m < 1 { face(now, false).opacity(1 - m) }
             if m > 0 { face(now, true).opacity(m) }
             if m < 1 { Canvas { g, size in northFrame(&g, size, now) }.opacity(1 - m).allowsHitTesting(false).zIndex(10) }
+            if m < 1, let h = loc.heading { NorthBandView(heading: h).opacity(1 - m).allowsHitTesting(false).zIndex(11) }
         }
     }
 
@@ -1374,4 +1375,69 @@ enum Eclipses {
         var prev = lat(d), t = d
         for _ in 0..<n { t = t.addingTimeInterval(step); let v = lat(t); if (v > prev) != inward { return (inward, t.addingTimeInterval(-step)) }; prev = v }
         return (inward, nil) }
+}
+
+
+/// North band (Levi, 2026-11-05): a thick band along the screen edge that starts on the side facing north and wraps
+/// further round both ways the closer you turn to north (whole screen at dead-on, under 1.5 deg). Turning away it
+/// shrinks back the same way: the opposite side thins first, the north side stays thick longest.
+/// watchOS 26+: Liquid Glass tinted orange over a soft orange fill; earlier: plain orange.
+struct NorthBand: Shape {
+    var north: Double      // screen angle of north, radians clockwise from the top
+    var cover: Double      // 0...1, how far round the edge the thick part reaches (1 = all the way)
+    var width: Double = 9
+    func path(in rect: CGRect) -> Path {
+        let r0 = rect.insetBy(dx: 1, dy: 1), cr = min(rect.width, rect.height) * 0.21, c = CGPoint(x: rect.midX, y: rect.midY)
+        // sample the rounded-rect edge by arc length, with inward normals
+        let w = r0.width - 2 * cr, hgt = r0.height - 2 * cr, arc = Double.pi / 2 * cr, total = 2 * (w + hgt) + 4 * arc, n = 240
+        var pts: [CGPoint] = [], nor: [CGVector] = []
+        for k in 0..<n {
+            var s = Double(k) / Double(n) * total
+            // order: top edge (left to right), top-right corner, right edge, bottom-right, bottom, bottom-left, left, top-left
+            let segs: [(Double, (Double) -> (CGPoint, CGVector))] = [
+                (w, { t in (CGPoint(x: r0.minX + cr + t, y: r0.minY), CGVector(dx: 0, dy: 1)) }),
+                (arc, { t in let a = -Double.pi / 2 + t / cr, o = CGPoint(x: r0.maxX - cr, y: r0.minY + cr); return (CGPoint(x: o.x + cr * cos(a), y: o.y + cr * sin(a)), CGVector(dx: -cos(a), dy: -sin(a))) }),
+                (hgt, { t in (CGPoint(x: r0.maxX, y: r0.minY + cr + t), CGVector(dx: -1, dy: 0)) }),
+                (arc, { t in let a = t / cr, o = CGPoint(x: r0.maxX - cr, y: r0.maxY - cr); return (CGPoint(x: o.x + cr * cos(a), y: o.y + cr * sin(a)), CGVector(dx: -cos(a), dy: -sin(a))) }),
+                (w, { t in (CGPoint(x: r0.maxX - cr - t, y: r0.maxY), CGVector(dx: 0, dy: -1)) }),
+                (arc, { t in let a = Double.pi / 2 + t / cr, o = CGPoint(x: r0.minX + cr, y: r0.maxY - cr); return (CGPoint(x: o.x + cr * cos(a), y: o.y + cr * sin(a)), CGVector(dx: -cos(a), dy: -sin(a))) }),
+                (hgt, { t in (CGPoint(x: r0.minX, y: r0.maxY - cr - t), CGVector(dx: 1, dy: 0)) }),
+                (arc, { t in let a = Double.pi + t / cr, o = CGPoint(x: r0.minX + cr, y: r0.minY + cr); return (CGPoint(x: o.x + cr * cos(a), y: o.y + cr * sin(a)), CGVector(dx: -cos(a), dy: -sin(a))) })]
+            for (len, f) in segs { if s <= len { let (p, v) = f(s); pts.append(p); nor.append(v); break }; s -= len }
+            if pts.count < k + 1 { let (p, v) = segs[0].1(0); pts.append(p); nor.append(v) }
+        }
+        // thickness: full inside the covered arc (measured from north), soft 25 deg taper at its ends
+        let reach = cover * 200 - 10
+        var path = Path(); path.addLines(pts); path.closeSubpath()
+        var inner: [CGPoint] = []
+        for k in 0..<n {
+            let p = pts[k], ang = atan2(Double(p.x - c.x), Double(c.y - p.y))
+            var dphi = abs(ang - north).truncatingRemainder(dividingBy: 2 * .pi); if dphi > .pi { dphi = 2 * .pi - dphi }
+            var t = max(0, min(1, (reach - dphi * 180 / .pi) / 25 + 0.5)); t = t * t * (3 - 2 * t)
+            let wk = 0.6 + (width - 0.6) * t * min(1, cover * 4)
+            inner.append(CGPoint(x: p.x + nor[k].dx * wk, y: p.y + nor[k].dy * wk))
+        }
+        path.addLines(inner.reversed()); path.closeSubpath()   // opposite winding: a ring under both fill rules
+        return path
+    }
+}
+
+struct NorthBandView: View {
+    let heading: Double
+    var body: some View {
+        let h = heading.truncatingRemainder(dividingBy: 360), hh = h < 0 ? h + 360 : h
+        let dv = min(hh, 360 - hh), x = max(0, min(1, 1 - (dv - 1.5) / 43.5)), cover = x * x * (3 - 2 * x)
+        let band = NorthBand(north: -hh * .pi / 180, cover: cover)
+        let o = FaceView.orange
+        ZStack {
+            if cover > 0.001 {
+                if #available(watchOS 26.0, *) {
+                    band.fill(o.opacity(0.45))
+                    Color.clear.glassEffect(.regular.tint(o.opacity(0.6)), in: band)
+                } else {
+                    band.fill(o.opacity(0.9))
+                }
+            }
+        }.ignoresSafeArea()
+    }
 }
