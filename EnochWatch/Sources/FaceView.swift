@@ -605,6 +605,7 @@ struct FaceView: View {
         return VStack(alignment: .leading, spacing: 5) {
             switch k {
             case .rain:
+                if let t = temp { row("NOW", tempF ? "\(Int((Double(t) * 9 / 5 + 32).rounded()))\u{00B0}F" : "\(t)\u{00B0}C") }
                 Text("RAIN NEXT 6H").font(mono(9)).foregroundColor(o)
                 if rain6.isEmpty { Text("NO DATA").font(mono(12)).foregroundColor(.white) }
                 else {
@@ -633,6 +634,13 @@ struct FaceView: View {
                     let r = sd.0, s = sd.1
                     let m = Int(s.timeIntervalSince(r) / 60)
                     row("SUNRISE", tf.string(from: r)); row("SUNSET", tf.string(from: s)); row("DAY", "\(m / 60)h \(String(format: "%02d", m % 60))m")
+                    // light for filming (added 2026-11-05): golden hour = sun -4 to +6 deg, blue hour = -6 to -4 deg
+                    if let g6 = sunDay(date, alt: 6), let g4 = sunDay(date, alt: -4), let b6 = sunDay(date, alt: -6) {
+                        Text("GOLDEN HOUR").font(mono(8)).foregroundColor(o).padding(.top, 2)
+                        row("AM", "\(tf.string(from: g4.0))-\(tf.string(from: g6.0))"); row("PM", "\(tf.string(from: g6.1))-\(tf.string(from: g4.1))")
+                        Text("BLUE HOUR").font(mono(8)).foregroundColor(o).padding(.top, 2)
+                        row("AM", "\(tf.string(from: b6.0))-\(tf.string(from: g4.0))"); row("PM", "\(tf.string(from: g4.1))-\(tf.string(from: b6.1))")
+                    }
                 } else { row("SUN", "POLAR") }
             case .sunBody:
                 let t = Eclipses.trend(date, sun: true)
@@ -669,9 +677,9 @@ struct FaceView: View {
     }
 
     /// Today's sunrise and sunset at your position (local solar calc from the subsolar point); nil in polar day/night.
-    private func sunDay(_ date: Date) -> (Date, Date)? {
+    private func sunDay(_ date: Date, alt: Double = -0.833) -> (Date, Date)? {
         let sky = Sky(date: date), d = Double.pi / 180, me = loc.coord
-        let cc = (sin(-0.833 * d) - sin(me.latitude * d) * sin(sky.sunLat * d)) / (cos(me.latitude * d) * cos(sky.sunLat * d))
+        let cc = (sin(alt * d) - sin(me.latitude * d) * sin(sky.sunLat * d)) / (cos(me.latitude * d) * cos(sky.sunLat * d))
         guard abs(cc) <= 1 else { return nil }
         let h0 = acos(cc) / d / 15, dn = ((sky.sunLon - me.longitude) / 15).truncatingRemainder(dividingBy: 24)
         let dn2 = dn > 12 ? dn - 24 : (dn < -12 ? dn + 24 : dn), noon = date.addingTimeInterval(dn2 * 3600)
@@ -906,12 +914,12 @@ struct FaceView: View {
 
     // ---- four corner complications ----
     @State private var temp: Int? = nil
+    @AppStorage("enochTempF") private var tempF = false
     @State private var rain: Int? = nil
     @State private var rain6: [Int] = []
     @State private var wxAt = Date.distantPast
     @State private var wxOk: Date? = nil
     @State private var wxCoord: CLLocationCoordinate2D? = nil
-    private let home = CLLocationCoordinate2D(latitude: 47.0682, longitude: 21.8548)
 
     private static let mint = Color(red: 0.75, green: 0.96, blue: 0.82), amber = FaceView.orange, alert = Color(red: 1, green: 0.29, blue: 0.24)
     /// the one UI orange (#FF8C1A) used by every orange element: borders, labels, date, tags
@@ -1258,6 +1266,7 @@ struct SettingsView: View {
     @ObservedObject var loc: Locator
     @AppStorage("enoch12h") private var h12 = false
     @AppStorage("enochRedMode") private var redMode = 0
+    @AppStorage("enochTempF") private var tempF = false
     @AppStorage("enochOnboarded") private var onboarded = true
     @AppStorage("enochHomeLat") private var homeLat: Double = 47.0682
     @AppStorage("enochHomeLon") private var homeLon: Double = 21.8548
@@ -1267,6 +1276,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 Section("Time") { Toggle("12-hour digits", isOn: $h12).tint(FaceView.orange) }
+                Section { Toggle("Fahrenheit", isOn: $tempF).tint(FaceView.orange) } header: { Text("Weather") } footer: { Text("Temperature shows when you tap RAIN.") }
                 Section {
                     Picker("Red night mode", selection: $redMode) { Text("Auto").tag(0); Text("Always").tag(1); Text("Off").tag(2) }
                 } footer: { Text("Auto turns red once the sun is 4\u{00B0} below your horizon.") }
@@ -1417,71 +1427,6 @@ enum Eclipses {
         var prev = lat(d), t = d
         for _ in 0..<n { t = t.addingTimeInterval(step); let v = lat(t); if (v > prev) != inward { return (inward, t.addingTimeInterval(-step)) }; prev = v }
         return (inward, nil) }
-}
-
-
-/// North band (Levi, 2026-11-05): a thick band along the screen edge that starts on the side facing north and wraps
-/// further round both ways the closer you turn to north (whole screen at dead-on, under 1.5 deg). Turning away it
-/// shrinks back the same way: the opposite side thins first, the north side stays thick longest.
-/// watchOS 26+: Liquid Glass tinted orange over a soft orange fill; earlier: plain orange.
-struct NorthBand: Shape {
-    var north: Double      // screen angle of north, radians clockwise from the top
-    var cover: Double      // 0...1, how far round the edge the thick part reaches (1 = all the way)
-    var width: Double = 9
-    func path(in rect: CGRect) -> Path {
-        let r0 = rect.insetBy(dx: 1, dy: 1), cr = min(rect.width, rect.height) * 0.21, c = CGPoint(x: rect.midX, y: rect.midY)
-        // sample the rounded-rect edge by arc length, with inward normals
-        let w = r0.width - 2 * cr, hgt = r0.height - 2 * cr, arc = Double.pi / 2 * cr, total = 2 * (w + hgt) + 4 * arc, n = 240
-        var pts: [CGPoint] = [], nor: [CGVector] = []
-        for k in 0..<n {
-            var s = Double(k) / Double(n) * total
-            // order: top edge (left to right), top-right corner, right edge, bottom-right, bottom, bottom-left, left, top-left
-            let segs: [(Double, (Double) -> (CGPoint, CGVector))] = [
-                (w, { t in (CGPoint(x: r0.minX + cr + t, y: r0.minY), CGVector(dx: 0, dy: 1)) }),
-                (arc, { t in let a = -Double.pi / 2 + t / cr, o = CGPoint(x: r0.maxX - cr, y: r0.minY + cr); return (CGPoint(x: o.x + cr * cos(a), y: o.y + cr * sin(a)), CGVector(dx: -cos(a), dy: -sin(a))) }),
-                (hgt, { t in (CGPoint(x: r0.maxX, y: r0.minY + cr + t), CGVector(dx: -1, dy: 0)) }),
-                (arc, { t in let a = t / cr, o = CGPoint(x: r0.maxX - cr, y: r0.maxY - cr); return (CGPoint(x: o.x + cr * cos(a), y: o.y + cr * sin(a)), CGVector(dx: -cos(a), dy: -sin(a))) }),
-                (w, { t in (CGPoint(x: r0.maxX - cr - t, y: r0.maxY), CGVector(dx: 0, dy: -1)) }),
-                (arc, { t in let a = Double.pi / 2 + t / cr, o = CGPoint(x: r0.minX + cr, y: r0.maxY - cr); return (CGPoint(x: o.x + cr * cos(a), y: o.y + cr * sin(a)), CGVector(dx: -cos(a), dy: -sin(a))) }),
-                (hgt, { t in (CGPoint(x: r0.minX, y: r0.maxY - cr - t), CGVector(dx: 1, dy: 0)) }),
-                (arc, { t in let a = Double.pi + t / cr, o = CGPoint(x: r0.minX + cr, y: r0.minY + cr); return (CGPoint(x: o.x + cr * cos(a), y: o.y + cr * sin(a)), CGVector(dx: -cos(a), dy: -sin(a))) })]
-            for (len, f) in segs { if s <= len { let (p, v) = f(s); pts.append(p); nor.append(v); break }; s -= len }
-            if pts.count < k + 1 { let (p, v) = segs[0].1(0); pts.append(p); nor.append(v) }
-        }
-        // thickness: full inside the covered arc (measured from north), soft 25 deg taper at its ends
-        let reach = cover * 200 - 10
-        var path = Path(); path.addLines(pts); path.closeSubpath()
-        var inner: [CGPoint] = []
-        for k in 0..<n {
-            let p = pts[k], ang = atan2(Double(p.x - c.x), Double(c.y - p.y))
-            var dphi = abs(ang - north).truncatingRemainder(dividingBy: 2 * .pi); if dphi > .pi { dphi = 2 * .pi - dphi }
-            var t = max(0, min(1, (reach - dphi * 180 / .pi) / 25 + 0.5)); t = t * t * (3 - 2 * t)
-            let wk = 0.6 + (width - 0.6) * t * min(1, cover * 4)
-            inner.append(CGPoint(x: p.x + nor[k].dx * wk, y: p.y + nor[k].dy * wk))
-        }
-        path.addLines(inner.reversed()); path.closeSubpath()   // opposite winding: a ring under both fill rules
-        return path
-    }
-}
-
-struct NorthBandView: View {
-    let heading: Double
-    var body: some View {
-        let h = heading.truncatingRemainder(dividingBy: 360), hh = h < 0 ? h + 360 : h
-        let dv = min(hh, 360 - hh), x = max(0, min(1, 1 - (dv - 1.5) / 43.5)), cover = x * x * (3 - 2 * x)
-        let band = NorthBand(north: -hh * .pi / 180, cover: cover)
-        let o = FaceView.orange
-        ZStack {
-            if cover > 0.001 {
-                if #available(watchOS 26.0, *) {
-                    band.fill(o.opacity(0.45))
-                    Color.clear.glassEffect(.regular.tint(o.opacity(0.6)), in: band)
-                } else {
-                    band.fill(o.opacity(0.9))
-                }
-            }
-        }.ignoresSafeArea()
-    }
 }
 
 
