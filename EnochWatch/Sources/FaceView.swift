@@ -183,6 +183,9 @@ struct FaceView: View {
     // calibration hint: only when the compass is really off. Heading invalid, or worse than 45 deg, for 5 s straight;
     // hidden again once it is better than 30 deg for 2 s. Ordinary 10-30 deg wobble never shows it.
     @State private var calShow = false
+    // sun lock: flash when you lock onto the real sun (under 5 deg, released over 8 deg)
+    @State private var sunOn = false
+    @State private var sunAt = Date.distantPast
     @State private var calSince: Date? = nil
 
     private func setCadence(_ c: TimelineViewDefaultContext.Cadence) {
@@ -228,6 +231,8 @@ struct FaceView: View {
                 let ca = loc.headingAcc, flip = calShow ? (ca >= 0 && ca < 30) : (ca < 0 || ca > 45)
                 if flip { if calSince == nil { calSince = now } else if now.timeIntervalSince(calSince!) >= (calShow ? 2 : 5) { calShow.toggle(); calSince = nil } }
                 else { calSince = nil }
+                if let sd = sunDev(now) { let on = sunOn ? sd < 8 : sd < 5; if on != sunOn { if on { sunAt = now }; sunOn = on } }
+                else if sunOn { sunOn = false }
                 if let h = loc.heading {
                     let dv = min(Self.m360(h), 360 - Self.m360(h)), on = northOn ? dv < 7 : dv < 4
                     if on != northOn { if on { northAt = now } else { northFrom = northLevel(now).0; northOffAt = now }; northOn = on }
@@ -291,6 +296,47 @@ struct FaceView: View {
         }
     }
     static func m360(_ x: Double) -> Double { let y = fmod(x, 360); return y < 0 ? y + 360 : y }
+
+    /// Degrees between where the watch points and the real sun; nil without a heading, with the sun down, or while scrubbing.
+    private func sunDev(_ now: Date) -> Double? {
+        guard let h = loc.heading, scrub == 0, sunAlt(now) > -0.833 else { return nil }
+        let d = Double.pi / 180, sky = Sky(date: now), p1 = loc.coord.latitude * d, p2 = sky.sunLat * d, dl = (sky.sunLon - loc.coord.longitude) * d
+        let az = atan2(sin(dl) * cos(p2), cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl)) / d
+        let x = Self.m360(h - az); return min(x, 360 - x)
+    }
+
+    /// Sun lock level: (opacity, flash). Full within 3 deg of the real sun, fading out by 25 deg; flash on locking on.
+    private func sunLevel(_ now: Date) -> (Double, Double) {
+        guard let dv = sunDev(now) else { return (0, 0) }
+        let x = max(0, min(1, 1 - (dv - 3) / 22)), base = x * x * (3 - 2 * x)
+        var f = 0.0
+        if sunOn { let t = now.timeIntervalSince(sunAt); f = t < 0.12 ? t / 0.12 : max(0, 1 - (t - 0.12) / 0.8) }
+        return (base, f)
+    }
+
+    /// Sun lock (active look): when you face the real sun, a warm line runs from your position to the sun on the fixed map
+    /// and the sun flares, the same way the north frame lights up when you face north.
+    private func sunLock(_ g: inout GraphicsContext, _ size: CGSize, _ now: Date) {
+        let (al, f) = sunLevel(now); if al <= 0.001 { return }
+        let d = Double.pi / 180, sky = Sky(date: now), c = CGPoint(x: size.width / 2, y: size.height / 2)
+        let R = (min(Self.scr.width, Self.scr.height) / 2 - 4) * zs.x
+        func P(_ lat: Double, _ lon: Double) -> CGPoint { let r = (90 - lat) / 180 * R; return CGPoint(x: c.x + r * sin(lon * d), y: c.y + r * cos(lon * d)) }
+        let u = P(loc.coord.latitude, loc.coord.longitude), sp = P(sky.sunLat, sky.sunLon)
+        let o = FaceView.orange, gold = Color(red: 1, green: 0.84, blue: 0.55)
+        var line = Path(); line.move(to: u); line.addLine(to: sp)
+        var gl = g; gl.blendMode = .plusLighter
+        gl.drawLayer { l in
+            l.addFilter(.blur(radius: 3 + 3 * f))
+            l.stroke(line, with: .linearGradient(Gradient(colors: [o.opacity(0.25 * al), o.opacity(0.7 * al)]), startPoint: u, endPoint: sp), lineWidth: 5 + 4 * f)
+        }
+        gl.stroke(line, with: .linearGradient(Gradient(colors: [o.opacity(0.55 * al), gold.opacity(al)]), startPoint: u, endPoint: sp),
+                  style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+        let fr = 22 + 26 * f
+        gl.fill(Path(ellipseIn: CGRect(x: sp.x - fr, y: sp.y - fr, width: 2 * fr, height: 2 * fr)), with: .radialGradient(Gradient(stops: [
+            .init(color: .white.opacity(0.7 * al), location: 0), .init(color: gold.opacity(0.45 * al), location: 0.25),
+            .init(color: o.opacity(0.18 * al), location: 0.6), .init(color: .clear, location: 1)]), center: sp, startRadius: 0, endRadius: fr))
+        gl.fill(Path(ellipseIn: CGRect(x: u.x - 2, y: u.y - 2, width: 4, height: 4)), with: .color(o.opacity(al)))
+    }
 
     /// 0 = active look, 1 = always-on look; eased over 0.5 s after every switch (no fade when watchOS itself dims)
     private func mix(_ now: Date) -> Double {
@@ -378,7 +424,8 @@ struct FaceView: View {
         let off = a ? 0 : sc.step(to: scrub, at: now)
         let date = now.addingTimeInterval(off * 3600)
         // compass: the whole disc (map, shading, outlines, sky) turns so the way you face points up; digits and text stay put
-        let spin = a ? rs.x : rs.step(to: rot.unwrap(compassAngle(now) ?? rot.last), at: now)
+        // map stays fixed (Levi, 2026-11-05): direction comes from the north frame, the sun lock and the heading readout
+        let spin = 0.0
         ZStack {
             // bottom to top: map + day/night + grid, glass digits, country/city outlines, stars + sun + moon, comps and text
             // always-on: everything greyscale and flat, except the sun and moon (layer 5, full colour)
@@ -386,6 +433,7 @@ struct FaceView: View {
             if !a { Canvas { g, size in sweep(&g, size, now) }.zIndex(0.5).allowsHitTesting(false) }
             if !a { Canvas { g, size in hourGlow(&g, size, now) }.zIndex(0.7).allowsHitTesting(false) }
             if !a { Canvas { g, size in compassMarks(&g, size, now) }.zIndex(4.2).allowsHitTesting(false) }
+            if !a { Canvas { g, size in sunLock(&g, size, now) }.zIndex(3.2).allowsHitTesting(false) }
             GlassTime(date: date, tilt: tilt, aod: a).offset(Self.px(tilt, 11)).aodGrey(a).zIndex(1)
             Canvas { g, size in draw(&g, size, date, 3, 0, a) }.spun(spin).offset(Self.px(tilt, 6)).aodGrey(a).zIndex(2).allowsHitTesting(false)
             Canvas { g, size in draw(&g, size, date, 1, 0, a) }.spun(spin).aodGrey(a).zIndex(3).allowsHitTesting(false)
@@ -598,7 +646,7 @@ struct FaceView: View {
             .init(color: Color(red: 1, green: 0.84, blue: 0.55).opacity(0.55), location: 0), .init(color: Color(red: 1, green: 0.66, blue: 0.27).opacity(0.18), location: 0.3),
             .init(color: .clear, location: 1)]), center: sp, startRadius: 0, endRadius: 40))
         // anamorphic streak is a lens effect: counter-rotate it so it stays level on screen while the disc turns with the compass
-        var fl = sg; fl.translateBy(x: sp.x, y: sp.y); fl.rotate(by: .degrees(-rs.x))
+        var fl = sg; fl.translateBy(x: sp.x, y: sp.y)
         fl.fill(Path(CGRect(x: -44, y: -0.7, width: 88, height: 1.4)), with: .linearGradient(Gradient(colors: [.clear, Color(red: 0.86, green: 0.92, blue: 1).opacity(0.55), .clear]),
             startPoint: CGPoint(x: -44, y: 0), endPoint: CGPoint(x: 44, y: 0)))
         g.fill(Path(ellipseIn: CGRect(x: sp.x - 6, y: sp.y - 6, width: 12, height: 12)), with: .radialGradient(Gradient(stops: [
