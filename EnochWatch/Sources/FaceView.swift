@@ -411,7 +411,6 @@ struct FaceView: View {
             if m < 1 { face(now, false).opacity(1 - m) }
             if m > 0 { face(now, true).opacity(m) }
             if m < 1 { Canvas { g, size in northFrame(&g, size, now) }.opacity(1 - m).allowsHitTesting(false).zIndex(10) }
-            if m < 1, let h = loc.heading { NorthBandView(heading: h).opacity(1 - m).allowsHitTesting(false).zIndex(11) }
         }
     }
 
@@ -438,13 +437,28 @@ struct FaceView: View {
         let lk = deadLevel(now)
         let o = FaceView.orange, cr = min(size.width, size.height) * 0.21
         let r = Path(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5), cornerRadius: cr, style: .continuous)
-        g.drawLayer { l in
-            l.addFilter(.blur(radius: 5 + 5 * f))
-            l.stroke(r, with: .color(o.opacity((0.45 + 0.45 * f + 0.15 * lk) * al)), lineWidth: 8 + 10 * f + 6 * lk)
+        // reveal (Levi, 2026-11-05): the frame fades in from the side facing north and spreads round both ways as you turn
+        // to north (all round at dead-on); turning away, the far side fades out first and the north side last
+        let hh = Self.m360(loc.heading ?? 0), north = -hh * .pi / 180, c = CGPoint(x: size.width / 2, y: size.height / 2)
+        let dv = min(hh, 360 - hh), x = max(0, min(1, 1 - (dv - 1.5) / 43.5)), cover = x * x * (3 - 2 * x), reach = cover * 210 - 15
+        var stops: [Gradient.Stop] = []
+        for k in 0...72 {
+            let th = Double(k) / 72 * 2 * .pi, ang = th + .pi / 2   // conic angle 0 = right; ang measured clockwise from the top
+            var dphi = abs(ang - north).truncatingRemainder(dividingBy: 2 * .pi); if dphi > .pi { dphi = 2 * .pi - dphi }
+            var t = max(0, min(1, (reach - dphi * 180 / .pi) / 40 + 0.5)); t = t * t * (3 - 2 * t)
+            stops.append(.init(color: .white.opacity(t), location: Double(k) / 72))
         }
-        g.stroke(r, with: .color(o.opacity(al)), lineWidth: 2.5 + 1.5 * f)
-        if lk > 0.001 { g.stroke(r, with: .color(o.opacity(al * lk)), lineWidth: 2.5 + 1.5 * f + 4.5 * lk) }
-        if f > 0 { g.stroke(r, with: .color(.white.opacity(0.5 * f * al)), lineWidth: 1) }
+        g.drawLayer { m in
+            m.drawLayer { l in
+                l.addFilter(.blur(radius: 5 + 5 * f))
+                l.stroke(r, with: .color(o.opacity((0.45 + 0.45 * f + 0.15 * lk) * al)), lineWidth: 8 + 10 * f + 6 * lk)
+            }
+            m.stroke(r, with: .color(o.opacity(al)), lineWidth: 2.5 + 1.5 * f)
+            if lk > 0.001 { m.stroke(r, with: .color(o.opacity(al * lk)), lineWidth: 2.5 + 1.5 * f + 4.5 * lk) }
+            if f > 0 { m.stroke(r, with: .color(.white.opacity(0.5 * f * al)), lineWidth: 1) }
+            m.blendMode = .destinationIn
+            m.fill(Path(CGRect(origin: .zero, size: size)), with: .conicGradient(Gradient(stops: stops), center: c, angle: .zero))
+        }
     }
 
     /// Full-hour flash: for the first 4 s of every hour, a soft orange glow blooms under the digits with one expanding ring.
